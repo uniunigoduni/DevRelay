@@ -1,4 +1,4 @@
-﻿# DevRelay
+# DevRelay
 
 DevRelay is a deliberately small MCP server that gives an MCP client access to the command line of a development machine.
 
@@ -137,9 +137,9 @@ The implementation patterns and interoperability references used for v0.1 are do
 For normal Windows use, two no-argument launchers are provided:
 
 - `DevRelay ChatGPT.cmd` starts the existing OpenAI Secure MCP Tunnel mode.
-- `DevRelay HTTPS.cmd` starts a temporary public HTTPS MCP endpoint through the bundled Cloudflare Quick Tunnel runtime.
+- `DevRelay HTTPS.cmd` starts the configured Cloudflare Named Tunnel and uses a fixed public HTTPS MCP URL.
 
-HTTPS mode prints and copies the generated `https://*.trycloudflare.com/mcp` URL. Use that URL when testing a URL-based ChatGPT connector with no authentication. The Quick Tunnel URL changes on every launch.
+HTTPS mode prints and copies the fixed MCP URL configured in `internal/.devrelay/https-named.json`. The machine-local Cloudflare tunnel credentials and hostname are excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
 

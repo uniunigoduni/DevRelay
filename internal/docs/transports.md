@@ -46,6 +46,6 @@ The HTTP MCP server instance is request-scoped as recommended by the current SDK
 
 ## Windows launcher integration
 
-The DevRelay server core still does not embed a tunnel protocol. On Windows, `DevRelay ChatGPT.cmd` manages the official OpenAI `tunnel-client` beside DevRelay as a separate supervised process; `DevRelay HTTPS.cmd` uses the bundled `cloudflared.exe` for temporary public HTTPS access.
+The DevRelay server core still does not embed a tunnel protocol. On Windows, `DevRelay ChatGPT.cmd` manages the official OpenAI `tunnel-client` beside DevRelay as a separate supervised process; `DevRelay HTTPS.cmd` uses the bundled `cloudflared.exe` with a machine-local Cloudflare Named Tunnel configuration for fixed-hostname HTTPS access.
 
 On first use the launcher downloads the official Windows bundle, materializes a `sample_mcp_remote_no_auth` profile pointing at the local `/mcp` endpoint, runs `tunnel-client doctor --explain`, and then starts `tunnel-client run`. This keeps the MCP server itself small while making the normal user workflow one command.

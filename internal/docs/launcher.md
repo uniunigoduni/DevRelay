@@ -3,7 +3,7 @@
 DevRelay exposes only two normal user-facing launchers in the project root.
 
 - `DevRelay ChatGPT.cmd`: OpenAI Secure MCP Tunnel mode.
-- `DevRelay HTTPS.cmd`: temporary public HTTPS mode through Cloudflare Quick Tunnel.
+- `DevRelay HTTPS.cmd`: fixed public HTTPS mode through a configured Cloudflare Named Tunnel.
 
 Both launchers delegate to the same internal implementation at `scripts/DevRelay-Launcher.ps1`, so dependency checks, builds, process supervision, and cleanup stay in one place.
 
@@ -21,18 +21,10 @@ Press `Ctrl+C` to stop DevRelay and the OpenAI tunnel.
 
 Double-click `DevRelay HTTPS.cmd`.
 
-It performs the same local dependency/build checks, starts DevRelay, then launches the bundled `cloudflared.exe` as an account-less Quick Tunnel.
+It performs the same local dependency/build checks, starts DevRelay, then launches the bundled `cloudflared.exe` with the machine-local Cloudflare Named Tunnel configuration.
 The origin Host header is rewritten to the local DevRelay listener so localhost Host validation remains enabled.
 
-When ready, it prints and copies a URL such as:
-
-```text
-https://example.trycloudflare.com/mcp
-```
-
-Register that URL in ChatGPT as a URL-based connector with `No authentication`.
-
-Quick Tunnel URLs change on every launch and have no uptime guarantee, so this mode is intended as a development fallback rather than a permanent public endpoint.
+When ready, it prints and copies the fixed MCP URL from `.devrelay/https-named.json`. The Cloudflare `config.yml`, tunnel credentials, hostname, and local launcher settings are machine-local and are not committed to Git.
 
 Press `Ctrl+C` to stop DevRelay and the HTTPS tunnel.
 
@@ -44,7 +36,7 @@ The old generic `DevRelay.cmd` entry point was removed to keep the project root 
 
 ## Local state
 
-- `.devrelay/`: launcher state, OpenAI tunnel profile, DPAPI-encrypted runtime key, and Quick Tunnel log.
+- `.devrelay/`: launcher state, OpenAI tunnel profile, DPAPI-encrypted runtime key, Named Tunnel settings, and tunnel logs.
 - `tools/tunnel-client/`: the official OpenAI tunnel-client bundle and bundled `cloudflared.exe`.
 
 Both paths are excluded from Git.

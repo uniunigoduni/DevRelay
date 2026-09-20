@@ -336,28 +336,32 @@ function Start-Tunnel([string]$Exe) {
 
 function Start-HttpsTunnel([string]$CloudflaredPath) {
   if (-not (Test-Path $CloudflaredPath)) { throw "cloudflared.exe was not found." }
-  $logPath = Join-Path $StateDir "cloudflared-quick.log"
+  $settingsPath = Join-Path $StateDir "https-named.json"
+  if (-not (Test-Path $settingsPath)) { throw "Cloudflare Named Tunnel settings were not found at $settingsPath" }
+  $settings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+  $tunnelName = [string]$settings.tunnelName
+  $hostname = [string]$settings.hostname
+  $namedConfig = [string]$settings.configPath
+  if (-not $tunnelName -or -not $hostname -or -not $namedConfig) { throw "Named Tunnel settings are incomplete." }
+  if (-not (Test-Path $namedConfig)) { throw "Cloudflare Named Tunnel config was not found at $namedConfig" }
+  $logPath = Join-Path $StateDir "cloudflared-named.log"
   Remove-Item $logPath -Force -ErrorAction SilentlyContinue
-  Write-Step "Starting Cloudflare Quick Tunnel..."
-  $arguments = @("tunnel", "--url", "http://${HostAddress}:$Port", "--http-host-header", "${HostAddress}:$Port", "--no-autoupdate", "--loglevel", "info", "--logfile", $logPath)
+  $baseUrl = "https://$hostname"
+  Write-Step "Starting Cloudflare Named Tunnel for $baseUrl..."
+  $arguments = @("tunnel", "--config", $namedConfig, "--loglevel", "info", "--logfile", $logPath, "run", $tunnelName)
   $process = Start-Process -FilePath $CloudflaredPath -ArgumentList $arguments -WorkingDirectory $Root -NoNewWindow -PassThru
-  for ($i = 0; $i -lt 120; $i++) {
+  for ($i = 0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 250
     if ($process.HasExited) {
       $details = if (Test-Path $logPath) { Get-Content -Raw $logPath } else { "" }
       throw "cloudflared exited during startup with code $($process.ExitCode). $details"
     }
-    if (Test-Path $logPath) {
-      $text = Get-Content -Raw $logPath
-      $match = [regex]::Match($text, 'https://[a-z0-9-]+\.trycloudflare\.com')
-      if ($match.Success) {
-        $baseUrl = $match.Value.TrimEnd('/')
-        return [pscustomobject]@{ Process = $process; BaseUrl = $baseUrl; McpUrl = "$baseUrl/mcp"; LogPath = $logPath }
-      }
+    if ((Test-Path $logPath) -and ((Get-Content -Raw $logPath) -match 'Registered tunnel connection')) {
+      return [pscustomobject]@{ Process = $process; BaseUrl = $baseUrl; McpUrl = "$baseUrl/mcp"; LogPath = $logPath }
     }
   }
   Stop-ProcessTree $process
-  throw "Cloudflare Quick Tunnel did not publish a URL within 30 seconds. See $logPath"
+  throw "Cloudflare Named Tunnel did not become ready within 20 seconds. See $logPath"
 }
 
 function Show-LauncherStatus {
@@ -408,7 +412,7 @@ if ($HttpsDirect) {
     Write-Host "  Public MCP: $($httpsTunnel.McpUrl)"
     Write-Host ""
     Write-Host "The public MCP URL was copied to the clipboard."
-    Write-Host "In ChatGPT, create a URL-based connector with No authentication."
+    Write-Host "The fixed MCP URL above was copied to the clipboard."
     Write-Host "Press Ctrl+C to stop DevRelay and the HTTPS tunnel."
 
     while ($true) {

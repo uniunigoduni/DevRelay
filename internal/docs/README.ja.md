@@ -5,7 +5,7 @@ DevRelayは、開発PCのコマンドラインをMCPクライアントから扱�
 ## ビルドとテスト
 
 ```powershell
-cd C:\Users\<user>\Downloads\DevRelay
+cd C:\Users\<user>\Downloads\DevRelay\internal
 npm install
 npm run build
 npm test
@@ -44,6 +44,6 @@ PTY、GUI、Webダッシュボード、DB、Git専用API、ファイル専用API
 通常は用途に応じて、プロジェクト直下の `DevRelay ChatGPT.cmd` または `DevRelay HTTPS.cmd` をダブルクリックします。
 
 - `DevRelay ChatGPT.cmd`: OpenAI Secure MCP Tunnel経由で起動します。
-- `DevRelay HTTPS.cmd`: Cloudflare Quick Tunnelで一時的な公開HTTPS MCP URLを発行します。
+- `DevRelay HTTPS.cmd`: Cloudflare Named Tunnelで固定HTTPS MCP URLを起動します。
 
 どちらも必要に応じてnpm依存関係の確認とビルドを自動で行います。共通処理は `scripts/DevRelay-Launcher.ps1` にまとめてあり、通常ユーザーが直接実行する必要はありません。旧 `DevRelay.cmd` は整理のため削除しました。詳細は [launcher.md](launcher.md) を参照してください。

@@ -30,6 +30,6 @@ All notable changes to DevRelay are documented here.
 ## Unreleased
 
 - Added `DevRelay ChatGPT.cmd` for one-click OpenAI Secure MCP Tunnel startup.
-- Added `DevRelay HTTPS.cmd` for one-click Cloudflare Quick Tunnel startup.
-- HTTPS mode copies the generated public MCP URL to the clipboard.
-- Quick Tunnel origin Host is pinned to localhost so DevRelay Host validation remains enabled.
+- Added `DevRelay HTTPS.cmd` for one-click Cloudflare Named Tunnel startup with a fixed hostname.
+- HTTPS mode copies the fixed public MCP URL to the clipboard.
+- Named Tunnel origin Host is pinned to localhost so DevRelay Host validation remains enabled.
