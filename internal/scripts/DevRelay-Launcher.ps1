@@ -37,7 +37,7 @@ function Ensure-Directory([string]$Path) {
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory = $Root) {
   Push-Location $WorkingDirectory
   try {
-    & $FilePath @Arguments
+    & $FilePath @Arguments 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) {
       throw "$FilePath exited with code $LASTEXITCODE"
     }
