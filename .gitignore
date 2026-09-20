@@ -2,7 +2,6 @@ internal/node_modules/
 internal/dist/
 internal/.devrelay/
 internal/tools/tunnel-client/
-internal/tools/webview2-sdk/
 *.log
 .env
 .env.*

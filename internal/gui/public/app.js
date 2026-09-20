@@ -1,6 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const aiLog = $("#aiLog");
 const pluginLog = $("#pluginLog");
+const themeSelect = $("#themeSelect");
 const modeSelect = $("#modeSelect");
 const portInput = $("#portInput");
 const autoStartInput = $("#autoStartInput");
@@ -65,17 +66,20 @@ function render(state) {
   const active = state.running || state.starting;
   const transition = state.starting || state.stopping;
 
+  document.documentElement.dataset.theme = settingsDirty ? themeSelect.value : (state.theme === "black-soft" ? "black-soft" : "white-soft");
   publicUrl.textContent = state.publicUrl || "-";
   if (!settingsDirty) {
+    themeSelect.value = state.theme === "black-soft" ? "black-soft" : "white-soft";
     modeSelect.value = state.mode;
     portInput.value = state.port;
     autoStartInput.checked = state.autoStart;
   }
 
+  themeSelect.disabled = requestBusy;
   modeSelect.disabled = active || transition;
   portInput.disabled = active || transition;
   autoStartInput.disabled = active || transition;
-  saveSettings.disabled = active || transition || requestBusy;
+  saveSettings.disabled = requestBusy;
 
   if (state.aiLogs.length !== lastAiCount) {
     renderLog(aiLog, state.aiLogs, "No commands yet.");
@@ -101,6 +105,10 @@ async function refresh() {
   try { render(await api("/api/state")); } catch {}
 }
 
+themeSelect.addEventListener("change", () => {
+  settingsDirty = true;
+  document.documentElement.dataset.theme = themeSelect.value;
+});
 [modeSelect, portInput, autoStartInput].forEach((element) => {
   element.addEventListener("change", () => { settingsDirty = true; });
 });
@@ -114,6 +122,7 @@ saveSettings.addEventListener("click", async () => {
     const value = await api("/api/settings", {
       method: "POST",
       body: JSON.stringify({
+        theme: themeSelect.value,
         mode: modeSelect.value,
         port: Number(portInput.value),
         autoStart: autoStartInput.checked

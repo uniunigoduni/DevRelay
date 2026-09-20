@@ -1,6 +1,8 @@
 import http from "node:http";
 import { spawn, execFile } from "node:child_process";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { appendFileSync } from "node:fs";
+import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,20 +11,70 @@ const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const settingsPath = path.join(stateDir, "gui-settings.json");
-const auditPath = path.join(stateDir, "ai-command.ndjson");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
 const guiPort = 7318;
 const hostDir = path.join(guiDir, "host");
 const hostSetupPath = path.join(hostDir, "Ensure-WebView2Sdk.ps1");
+const fontSetupPath = path.join(hostDir, "Ensure-NotoSansMono.ps1");
 const hostScriptPath = path.join(hostDir, "DevRelay-GuiHost.ps1");
-const webView2Root = path.join(internalRoot, "tools", "webview2-sdk");
+const webView2Root = path.join(stateDir, "webview2-sdk");
+const fontRoot = path.join(stateDir, "fonts");
+const logsRoot = path.join(stateDir, "logs");
 
 const modeArg = process.argv.find((arg) => arg.startsWith("--mode="));
 const requestedMode = modeArg?.split("=")[1] === "chatgpt" ? "chatgpt" : "https";
+
+async function existingGuiIsRunning() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port: guiPort, path: "/api/state", timeout: 500 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.once("error", () => resolve(false));
+    req.once("timeout", () => { req.destroy(); resolve(false); });
+  });
+}
+if (await existingGuiIsRunning()) process.exit(0);
+
 await mkdir(stateDir, { recursive: true });
+await mkdir(logsRoot, { recursive: true });
+
+function localStamp(date) {
+  const two = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
+}
+
+const sessionId = randomUUID();
+const sessionName = `${localStamp(new Date())}-${sessionId.slice(0, 8)}`;
+const sessionDir = path.join(logsRoot, sessionName);
+await mkdir(sessionDir, { recursive: true });
+const auditPath = path.join(sessionDir, "audit.ndjson");
+const commandLogPath = path.join(sessionDir, "command.log");
+const serverLogPath = path.join(sessionDir, "server.log");
+const sessionPath = path.join(sessionDir, "session.json");
+await writeFile(auditPath, "", "utf8");
+await writeFile(commandLogPath, "", "utf8");
+await writeFile(serverLogPath, "", "utf8");
+
+async function pruneLogSessions() {
+  const pattern = /^\d{8}-\d{6}-[0-9a-f]{8}$/i;
+  const entries = await readdir(logsRoot, { withFileTypes: true });
+  const sessions = entries.filter((entry) => entry.isDirectory() && pattern.test(entry.name)).map((entry) => entry.name).sort().reverse();
+  const keep = new Set([sessionName, ...sessions.filter((name) => name !== sessionName).slice(0, 2)]);
+  await Promise.all(sessions.filter((name) => !keep.has(name)).map((name) => rm(path.join(logsRoot, name), { recursive: true, force: true })));
+}
+await pruneLogSessions();
+
+let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, mode: requestedMode };
+async function persistSessionMeta(values = {}) {
+  sessionMeta = { ...sessionMeta, ...values };
+  await writeFile(sessionPath, `${JSON.stringify(sessionMeta, null, 2)}\n`, "utf8");
+}
+await persistSessionMeta();
 
 let settings = await loadSettings();
 settings.mode = requestedMode;
+await persistSessionMeta({ mode: settings.mode, theme: settings.theme });
 let runtime = null;
 let windowHost = null;
 let shuttingDown = false;
@@ -47,8 +99,11 @@ const MAX_LOG_LINES = 900;
 function pushLog(target, message, level = "info") {
   const text = String(message ?? "").trimEnd();
   if (!text) return;
-  target.push({ at: new Date().toISOString(), level, text });
+  const at = new Date().toISOString();
+  target.push({ at, level, text });
   if (target.length > MAX_LOG_LINES) target.splice(0, target.length - MAX_LOG_LINES);
+  const logPath = target === aiLogs ? commandLogPath : target === pluginLogs ? serverLogPath : null;
+  if (logPath) appendFileSync(logPath, `${at} [${String(level).toUpperCase()}] ${text.replace(/\r?\n/g, "\\n")}\n`, "utf8");
 }
 
 async function loadSettings() {
@@ -57,14 +112,15 @@ async function loadSettings() {
     return {
       mode: requestedMode,
       port: Number.isInteger(parsed.port) ? parsed.port : 7317,
-      autoStart: parsed.autoStart !== false
+      autoStart: parsed.autoStart !== false,
+      theme: parsed.theme === "black-soft" ? "black-soft" : "white-soft"
     };
   } catch {
-    return { mode: requestedMode, port: 7317, autoStart: true };
+    return { mode: requestedMode, port: 7317, autoStart: true, theme: "white-soft" };
   }
 }
 async function saveSettings() {
-  const persisted = { mode: settings.mode, port: settings.port, autoStart: settings.autoStart };
+  const persisted = { mode: settings.mode, port: settings.port, autoStart: settings.autoStart, theme: settings.theme };
   await writeFile(settingsPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 }
 
@@ -84,6 +140,8 @@ function snapshot() {
     mode: settings.mode,
     port: settings.port,
     autoStart: settings.autoStart,
+    theme: settings.theme,
+    sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
     aiLogs,
@@ -120,13 +178,13 @@ async function pollAudit() {
 }
 
 function formatAudit(event) {
-  if (event.event === "exec.start") return `笆ｶ exec  ${event.command}`;
+  if (event.event === "exec.start") return `> exec  ${event.command}`;
   if (event.event === "exec.end") {
-    return `竊ｳ exec finished  exit=${event.exitCode ?? "?"}${event.timedOut ? "  timeout" : ""}`;
+    return `< exec finished  exit=${event.exitCode ?? "?"}${event.timedOut ? "  timeout" : ""}`;
   }
-  if (event.event === "process.start") return `${event.terminal ? "笆ｶ terminal" : "笆ｶ process"}  ${event.command}  [${event.processId}]`;
-  if (event.event === "process.exit") return `竊ｳ process exited  exit=${event.exitCode ?? "?"}  [${event.processId}]`;
-  if (event.event === "process.stop") return `笆 process stopped  [${event.processId}]`;
+  if (event.event === "process.start") return `${event.terminal ? "> terminal" : "> process"}  ${event.command}  [${event.processId}]`;
+  if (event.event === "process.exit") return `< process exited  exit=${event.exitCode ?? "?"}  [${event.processId}]`;
+  if (event.event === "process.stop") return `x process stopped  [${event.processId}]`;
   return `${event.event}`;
 }
 
@@ -137,10 +195,6 @@ async function startRuntime() {
   state.stopping = false;
   state.lastError = null;
   state.startedAt = null;
-  aiLogs.length = 0;
-  pluginLogs.length = 0;
-  auditSeen = 0;
-  await writeFile(auditPath, "", "utf8");
   publicUrl = await resolvePublicUrl(settings.mode);
 
   const args = [
@@ -155,7 +209,7 @@ async function startRuntime() {
     cwd: internalRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, DEVRELAY_AUDIT_LOG: auditPath }
+    env: { ...process.env, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
   });
 
   runtime.stdout.setEncoding("utf8");
@@ -264,16 +318,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, snapshot());
     }
     if (req.method === "POST" && url.pathname === "/api/settings") {
-      if (runtime || state.starting || state.running) {
-        return sendJson(res, 409, { error: "Stop DevRelay before changing runtime settings." });
-      }
       const next = await readJson(req);
       const mode = next.mode === "chatgpt" ? "chatgpt" : "https";
       const port = Number(next.port);
+      const autoStart = next.autoStart !== false;
+      const theme = next.theme === "black-soft" ? "black-soft" : "white-soft";
       if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === guiPort) {
         return sendJson(res, 400, { error: "Port must be an integer from 1024 to 65535." });
       }
-      settings = { mode, port, autoStart: next.autoStart !== false };
+      const runtimeSettingChanged = mode !== settings.mode || port !== settings.port || autoStart !== settings.autoStart;
+      if ((runtime || state.starting || state.running) && runtimeSettingChanged) {
+        return sendJson(res, 409, { error: "Stop DevRelay before changing runtime settings." });
+      }
+      settings = { mode, port, autoStart, theme };
       publicUrl = await resolvePublicUrl(settings.mode);
       await saveSettings();
       return sendJson(res, 200, snapshot());
@@ -321,7 +378,8 @@ function runPowerShellFile(filePath, args = []) {
 
 async function launchWindow() {
   await runPowerShellFile(hostSetupPath, ["-Root", webView2Root]);
-  const profile = path.join(stateDir, "gui-webview2-profile");
+  await runPowerShellFile(fontSetupPath, ["-Root", fontRoot]);
+  const profile = path.join(stateDir, "webview2-profile");
   const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
   lastHeartbeatAt = 0;
@@ -345,6 +403,7 @@ async function shutdown(reason) {
   if (closeTimer) clearTimeout(closeTimer);
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
   await stopRuntime(reason);
+  await persistSessionMeta({ endedAt: new Date().toISOString(), status: "closed", exitReason: reason });
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);

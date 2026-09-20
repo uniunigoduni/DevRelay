@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-theme="white-soft">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <title>DevRelay</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -22,11 +22,15 @@
           <div class="empty-state">Waiting for server output.</div>
         </div>
       </article>
-    </section>
-
-    <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
+    </section>    <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
       <aside id="settingsPanel" class="settings-panel" aria-label="Settings">
         <h3>Settings</h3>
+        <label>Theme
+          <select id="themeSelect">
+            <option value="white-soft">#FFFFFF Soft</option>
+            <option value="black-soft">#000000 Soft</option>
+          </select>
+        </label>
         <label>Mode
           <select id="modeSelect">
             <option value="https">HTTPS Named Tunnel</option>
@@ -41,10 +45,9 @@
           <input id="autoStartInput" type="checkbox">
         </label>
         <button id="saveSettings" class="save-button" type="button">Save</button>
-        <div id="settingsMessage" class="settings-message" aria-live="polite"></div>
-        <div class="endpoint">
+        <div id="settingsMessage" class="settings-message" aria-live="polite"></div>        <div class="endpoint">
           <span>Endpoint</span>
-          <code id="publicUrl">—</code>
+          <code id="publicUrl">-</code>
         </div>
       </aside>
     </div>

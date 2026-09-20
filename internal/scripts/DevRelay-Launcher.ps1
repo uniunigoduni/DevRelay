@@ -344,7 +344,9 @@ function Start-HttpsTunnel([string]$CloudflaredPath) {
   $namedConfig = [string]$settings.configPath
   if (-not $tunnelName -or -not $hostname -or -not $namedConfig) { throw "Named Tunnel settings are incomplete." }
   if (-not (Test-Path $namedConfig)) { throw "Cloudflare Named Tunnel config was not found at $namedConfig" }
-  $logPath = Join-Path $StateDir "cloudflared-named.log"
+  $logRoot = if ($env:DEVRELAY_SESSION_DIR) { $env:DEVRELAY_SESSION_DIR } else { $StateDir }
+  New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
+  $logPath = Join-Path $logRoot "cloudflared-named.log"
   Remove-Item $logPath -Force -ErrorAction SilentlyContinue
   $baseUrl = "https://$hostname"
   Write-Step "Starting Cloudflare Named Tunnel for $baseUrl..."
