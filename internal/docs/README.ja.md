@@ -46,4 +46,4 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 - `DevRelay ChatGPT.cmd`: GUIをOpenAI Secure MCP Tunnelモードで開きます。
 - `DevRelay HTTPS.cmd`: GUIをCloudflare Named Tunnelモードで開きます。
 
-GUIは小さめのEdgeアプリモードで表示され、右上の赤いStart/Stop、左側のAIコマンドログとMCP/トンネルログ、右下の設定を提供します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。
+GUIはOS標準フレームを使わないWPF/WebView2ウィンドウで、既定サイズは780×560です。本文は `Command log` と `Server log` だけに絞り、赤いStart/Stopと歯車は自前タイトルバーに置きます。設定は歯車を押した時だけ表示されます。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。

@@ -5,20 +5,19 @@ DevRelay exposes two normal user-facing launchers in the project root:
 - `DevRelay ChatGPT.cmd`: opens the GUI in OpenAI Secure MCP Tunnel mode.
 - `DevRelay HTTPS.cmd`: opens the GUI in Cloudflare Named Tunnel mode.
 
-Both launchers immediately hand off to a hidden local controller and show a compact Microsoft Edge app-mode window instead of keeping a terminal open.
+Both launchers immediately hand off to a hidden local controller and show a compact custom-framed WPF window hosting WebView2 instead of keeping a terminal open. The default window is 780×560, with a 680×480 minimum.
 
 ## Control GUI
 
 The GUI is intentionally part of the safety model: DevRelay should not appear to be running invisibly in the background.
 
-- The red button at top right starts or stops DevRelay while keeping the GUI open.
-- The upper-left log shows commands initiated through DevRelay (`exec` and managed processes).
-- The lower-left log shows MCP server, launcher, and tunnel output.
-- Settings are at bottom right and can be changed while the server is stopped.
+- The custom title bar contains the red Start/Stop control, a settings gear, and the window controls.
+- The main body contains only `Command log` and `Server log`.
+- Settings stay hidden until the gear button is pressed and can be changed while the server is stopped.
 - Closing the GUI window stops DevRelay and the active tunnel.
 The local GUI controller listens only on `127.0.0.1:7318` and rejects state-changing requests from other browser origins. It uses a heartbeat from the visible app window; if that heartbeat disappears, the controller shuts down the server/tunnel process tree.
 
-The UI follows the same dark Material 3 Expressive design language used by `nas-photo`: surface-container layers, large rounded cards, compact expressive motion, and blue primary accents. Scrollable regions use the custom overlay-thumb approach used by `vault-edit` instead of native browser scrollbars.
+The web content follows the dark Material 3 Expressive design language used by `nas-photo`, while the custom window chrome follows the frameless WPF pattern used by `audio-router`. Scrollable regions use the custom overlay-thumb approach used by `vault-edit` instead of native browser scrollbars.
 
 ## HTTPS mode
 
@@ -31,7 +30,8 @@ The GUI uses the same internal PowerShell launcher to validate and start the Ope
 ## Internal implementation
 
 - `gui/devrelay-gui.mjs`: local GUI controller and process owner.
-- `gui/public/`: the local Material 3 Expressive interface.
+- `gui/public/`: the minimal Material 3 Expressive log/settings interface.
+- `gui/host/`: custom WPF window chrome and WebView2 host/setup scripts.
 - `gui/launch.vbs`: hidden handoff from the double-click launchers.
 - `scripts/DevRelay-Launcher.ps1`: build, MCP, and tunnel setup/supervision worker.
 

@@ -8,94 +8,47 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="top-bar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">D</div>
-        <div>
-          <div class="eyebrow">DEVRELAY</div>
-          <h1>外部操作コントロール</h1>
+  <main class="app">
+    <section class="logs" aria-label="Logs">
+      <article class="log-card">
+        <h2>Command log</h2>
+        <div id="aiLog" class="log-view" role="log" aria-live="polite">
+          <div class="empty-state">No commands yet.</div>
         </div>
-      </div>
-      <div class="top-actions">
-        <span id="liveBadge" class="live-badge">OFFLINE</span>
-        <button id="powerButton" class="power-button" type="button">START</button>
-      </div>
-    </header>
+      </article>
+      <article class="log-card">
+        <h2>Server log</h2>
+        <div id="pluginLog" class="log-view" role="log" aria-live="polite">
+          <div class="empty-state">Waiting for server output.</div>
+        </div>
+      </article>
+    </section>
 
-    <main class="workspace">
-      <section class="logs-column" aria-label="ログ">
-        <article class="log-card">
-          <div class="card-heading">
-            <div>
-              <span class="section-kicker">AI ACTIVITY</span>
-              <h2>AI コマンド操作</h2>
-            </div>
-            <span class="log-dot command-dot" aria-hidden="true"></span>
-          </div>
-          <div id="aiLog" class="log-view" role="log" aria-live="polite">
-            <div class="empty-state">まだコマンド操作はありません。</div>
-          </div>
-        </article>
-
-        <article class="log-card">
-          <div class="card-heading">
-            <div>
-              <span class="section-kicker">SERVER</span>
-              <h2>プラグイン / MCP サーバー</h2>
-            </div>
-            <span class="log-dot server-dot" aria-hidden="true"></span>
-          </div>
-          <div id="pluginLog" class="log-view" role="log" aria-live="polite">
-            <div class="empty-state">サーバーログを待っています。</div>
-          </div>
-        </article>
-      </section>
-      <aside class="control-column">
-        <section class="status-card">
-          <span class="section-kicker">CONNECTION</span>
-          <h2 id="modeTitle">HTTPS Named Tunnel</h2>
-          <div class="connection-state">
-            <span id="stateOrb" class="state-orb"></span>
-            <div>
-              <strong id="stateText">停止中</strong>
-              <span id="runtimeText">GUIのみ起動しています</span>
-            </div>
-          </div>
-          <dl class="endpoint-list">
-            <div><dt>公開</dt><dd id="publicUrl">—</dd></div>
-            <div><dt>ローカル</dt><dd id="localUrl">—</dd></div>
-          </dl>
-          <p class="safety-note">このウィンドウが開いている間だけ、外部からの操作を許可できます。ウィンドウを閉じるとサーバーも停止します。</p>
-        </section>
-
-        <section class="settings-card">
-          <div class="card-heading compact">
-            <div><span class="section-kicker">SETTINGS</span><h2>設定</h2></div>
-          </div>
-          <label class="field-label">接続モード
-            <select id="modeSelect">
-              <option value="https">HTTPS Named Tunnel</option>
-              <option value="chatgpt">OpenAI Secure Tunnel</option>
-            </select>
-          </label>
-          <label class="field-label">MCP ポート
-            <input id="portInput" type="number" min="1024" max="65535" step="1" inputmode="numeric">
-          </label>
-          <label class="toggle-row">
-            <span>
-              <strong>起動時にサーバー開始</strong>
-              <small>GUIを開いた直後に接続を開始します</small>
-            </span>
-            <input id="autoStartInput" class="switch-input" type="checkbox">
-            <span class="switch-track" aria-hidden="true"><span></span></span>
-          </label>
-          <button id="saveSettings" class="save-button" type="button">設定を保存</button>
-          <div id="settingsMessage" class="settings-message" aria-live="polite"></div>
-        </section>
+    <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
+      <aside id="settingsPanel" class="settings-panel" aria-label="Settings">
+        <h3>Settings</h3>
+        <label>Mode
+          <select id="modeSelect">
+            <option value="https">HTTPS Named Tunnel</option>
+            <option value="chatgpt">OpenAI Secure Tunnel</option>
+          </select>
+        </label>
+        <label>Port
+          <input id="portInput" type="number" min="1024" max="65535" step="1" inputmode="numeric">
+        </label>
+        <label class="toggle-row">
+          <span>Auto start</span>
+          <input id="autoStartInput" type="checkbox">
+        </label>
+        <button id="saveSettings" class="save-button" type="button">Save</button>
+        <div id="settingsMessage" class="settings-message" aria-live="polite"></div>
+        <div class="endpoint">
+          <span>Endpoint</span>
+          <code id="publicUrl">—</code>
+        </div>
       </aside>
-    </main>
-  </div>
+    </div>
+  </main>
   <script src="/app.js" defer></script>
 </body>
 </html>

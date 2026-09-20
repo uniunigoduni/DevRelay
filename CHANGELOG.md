@@ -7,9 +7,9 @@ All notable changes to DevRelay are documented here.
 ### Added
 
 - Added `DevRelay ChatGPT.cmd` and `DevRelay HTTPS.cmd` as the two user-facing Windows launchers.
-- Added a compact local Edge app-mode control GUI with a top-right Start/Stop control.
-- Added separate AI command activity and MCP/tunnel server log views.
-- Added local GUI settings for connection mode, MCP port, and launch-time auto-start.
+- Added a compact custom-framed WPF/WebView2 control GUI with title-bar Start/Stop control.
+- Added separate `Command log` and `Server log` views with a default 780×560 layout.
+- Added a gear-triggered settings panel for connection mode, MCP port, and launch-time auto-start.
 - Added command audit events for `exec` and managed processes without recording stdin contents.
 - Added Cloudflare Named Tunnel support with a fixed hostname and machine-local configuration.
 - Added GUI heartbeat shutdown: closing or losing the visible GUI stops DevRelay and the tunnel.

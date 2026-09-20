@@ -1,12 +1,4 @@
 const $ = (selector) => document.querySelector(selector);
-const powerButton = $("#powerButton");
-const liveBadge = $("#liveBadge");
-const stateOrb = $("#stateOrb");
-const stateText = $("#stateText");
-const runtimeText = $("#runtimeText");
-const modeTitle = $("#modeTitle");
-const publicUrl = $("#publicUrl");
-const localUrl = $("#localUrl");
 const aiLog = $("#aiLog");
 const pluginLog = $("#pluginLog");
 const modeSelect = $("#modeSelect");
@@ -14,6 +6,8 @@ const portInput = $("#portInput");
 const autoStartInput = $("#autoStartInput");
 const saveSettings = $("#saveSettings");
 const settingsMessage = $("#settingsMessage");
+const publicUrl = $("#publicUrl");
+const settingsBackdrop = $("#settingsBackdrop");
 
 let lastState = null;
 let lastAiCount = -1;
@@ -26,16 +20,14 @@ function escapeHtml(value) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[char]);
 }
+
 function timeLabel(iso) {
   try {
     return new Intl.DateTimeFormat("ja-JP", {
       hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
     }).format(new Date(iso));
-  } catch {
-    return "--:--:--";
-  }
+  } catch { return "--:--:--"; }
 }
-
 function nearBottom(element) {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 40;
 }
@@ -53,48 +45,48 @@ function renderLog(element, entries, emptyText) {
   if (keepBottom) element.scrollTop = element.scrollHeight;
 }
 
-function modeName(mode) {
-  return mode === "chatgpt" ? "OpenAI Secure Tunnel" : "HTTPS Named Tunnel";
+function setSettingsOpen(open) {
+  settingsBackdrop.classList.toggle("open", open);
+  settingsBackdrop.setAttribute("aria-hidden", String(!open));
 }
+
+window.DevRelayUi = {
+  toggleSettings() { setSettingsOpen(!settingsBackdrop.classList.contains("open")); }
+};
+
+settingsBackdrop.addEventListener("click", (event) => {
+  if (event.target === settingsBackdrop) setSettingsOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSettingsOpen(false);
+});
 function render(state) {
   lastState = state;
   const active = state.running || state.starting;
   const transition = state.starting || state.stopping;
 
-  powerButton.textContent = active ? "STOP" : "START";
-  powerButton.classList.toggle("running", active);
-  powerButton.disabled = state.stopping || requestBusy;
-  liveBadge.textContent = state.running ? "LIVE" : state.starting ? "STARTING" : state.stopping ? "STOPPING" : "OFFLINE";
-  liveBadge.classList.toggle("live", active);
-  stateOrb.classList.toggle("live", active);
-  stateText.textContent = state.running ? "外部操作を許可中" : state.starting ? "起動中" : state.stopping ? "停止中" : "停止中";
-  runtimeText.textContent = state.running
-    ? `${modeName(state.mode)} が稼働しています`
-    : state.starting ? "接続を準備しています" : "GUIのみ起動しています";
-
-  modeTitle.textContent = modeName(state.mode);
-  publicUrl.textContent = state.publicUrl || "—";
-  localUrl.textContent = state.localUrl || "—";
-
+  publicUrl.textContent = state.publicUrl || "-";
   if (!settingsDirty) {
     modeSelect.value = state.mode;
     portInput.value = state.port;
     autoStartInput.checked = state.autoStart;
   }
+
   modeSelect.disabled = active || transition;
   portInput.disabled = active || transition;
   autoStartInput.disabled = active || transition;
   saveSettings.disabled = active || transition || requestBusy;
 
   if (state.aiLogs.length !== lastAiCount) {
-    renderLog(aiLog, state.aiLogs, "まだコマンド操作はありません。");
+    renderLog(aiLog, state.aiLogs, "No commands yet.");
     lastAiCount = state.aiLogs.length;
   }
   if (state.pluginLogs.length !== lastPluginCount) {
-    renderLog(pluginLog, state.pluginLogs, "サーバーログを待っています。");
+    renderLog(pluginLog, state.pluginLogs, "Waiting for server output.");
     lastPluginCount = state.pluginLogs.length;
   }
 }
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     cache: "no-store",
@@ -105,31 +97,10 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
   return value;
 }
-
 async function refresh() {
-  try {
-    render(await api("/api/state"));
-  } catch {
-    // Closing the control window intentionally tears the local server down.
-  }
+  try { render(await api("/api/state")); } catch {}
 }
 
-powerButton.addEventListener("click", async () => {
-  if (!lastState || requestBusy) return;
-  requestBusy = true;
-  powerButton.disabled = true;
-  settingsMessage.textContent = "";
-  try {
-    const active = lastState.running || lastState.starting;
-    render(await api(active ? "/api/stop" : "/api/start", { method: "POST" }));
-  } catch (error) {
-    settingsMessage.textContent = error.message;
-    settingsMessage.classList.add("error");
-  } finally {
-    requestBusy = false;
-    await refresh();
-  }
-});
 [modeSelect, portInput, autoStartInput].forEach((element) => {
   element.addEventListener("change", () => { settingsDirty = true; });
 });
@@ -138,7 +109,7 @@ saveSettings.addEventListener("click", async () => {
   if (requestBusy) return;
   requestBusy = true;
   settingsMessage.classList.remove("error");
-  settingsMessage.textContent = "保存中…";
+  settingsMessage.textContent = "Saving...";
   try {
     const value = await api("/api/settings", {
       method: "POST",
@@ -150,7 +121,7 @@ saveSettings.addEventListener("click", async () => {
     });
     settingsDirty = false;
     render(value);
-    settingsMessage.textContent = "保存しました";
+    settingsMessage.textContent = "Saved";
   } catch (error) {
     settingsMessage.textContent = error.message;
     settingsMessage.classList.add("error");
@@ -170,8 +141,9 @@ window.addEventListener("pagehide", () => {
 });
 
 void refresh();
+
 (() => {
-  const selector = ".log-view, .control-column, .workspace";
+  const selector = ".log-view, .settings-panel";
   const controllers = new Map();
   const edgeInset = 3;
   const minimumThumbLength = 28;

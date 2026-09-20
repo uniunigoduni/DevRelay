@@ -1,7 +1,6 @@
 import http from "node:http";
 import { spawn, execFile } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +12,10 @@ const settingsPath = path.join(stateDir, "gui-settings.json");
 const auditPath = path.join(stateDir, "ai-command.ndjson");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
 const guiPort = 7318;
+const hostDir = path.join(guiDir, "host");
+const hostSetupPath = path.join(hostDir, "Ensure-WebView2Sdk.ps1");
+const hostScriptPath = path.join(hostDir, "DevRelay-GuiHost.ps1");
+const webView2Root = path.join(internalRoot, "tools", "webview2-sdk");
 
 const modeArg = process.argv.find((arg) => arg.startsWith("--mode="));
 const requestedMode = modeArg?.split("=")[1] === "chatgpt" ? "chatgpt" : "https";
@@ -21,7 +24,7 @@ await mkdir(stateDir, { recursive: true });
 let settings = await loadSettings();
 settings.mode = requestedMode;
 let runtime = null;
-let edge = null;
+let windowHost = null;
 let shuttingDown = false;
 let closeTimer = null;
 let windowLaunchedAt = 0;
@@ -117,13 +120,13 @@ async function pollAudit() {
 }
 
 function formatAudit(event) {
-  if (event.event === "exec.start") return `▶ exec  ${event.command}`;
+  if (event.event === "exec.start") return `笆ｶ exec  ${event.command}`;
   if (event.event === "exec.end") {
-    return `↳ exec finished  exit=${event.exitCode ?? "?"}${event.timedOut ? "  timeout" : ""}`;
+    return `竊ｳ exec finished  exit=${event.exitCode ?? "?"}${event.timedOut ? "  timeout" : ""}`;
   }
-  if (event.event === "process.start") return `${event.terminal ? "▶ terminal" : "▶ process"}  ${event.command}  [${event.processId}]`;
-  if (event.event === "process.exit") return `↳ process exited  exit=${event.exitCode ?? "?"}  [${event.processId}]`;
-  if (event.event === "process.stop") return `■ process stopped  [${event.processId}]`;
+  if (event.event === "process.start") return `${event.terminal ? "笆ｶ terminal" : "笆ｶ process"}  ${event.command}  [${event.processId}]`;
+  if (event.event === "process.exit") return `竊ｳ process exited  exit=${event.exitCode ?? "?"}  [${event.processId}]`;
+  if (event.event === "process.stop") return `笆 process stopped  [${event.processId}]`;
   return `${event.event}`;
 }
 
@@ -168,7 +171,9 @@ async function startRuntime() {
   });
 
   runtime.once("exit", (code, signal) => {
-    pushLog(pluginLogs, `[GUI] Runtime exited  code=${code ?? "?"} signal=${signal ?? "-"}`,
+    const expectedStop = state.stopping;
+    if (expectedStop) pushLog(pluginLogs, "[GUI] Runtime stopped.");
+    else pushLog(pluginLogs, `[GUI] Runtime exited  code=${code ?? "?"} signal=${signal ?? "-"}`,
       code === 0 ? "info" : "error");
     runtime = null;
     state.running = false;
@@ -304,35 +309,32 @@ function scheduleWindowClose() {
   }, 1400);
 }
 
-function findEdge() {
-  const candidates = [
-    path.join(process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe"),
-    path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe"),
-    path.join(process.env.LOCALAPPDATA ?? "", "Microsoft", "Edge", "Application", "msedge.exe")
-  ];
-  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
+function runPowerShellFile(filePath, args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("powershell.exe", [
+      "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filePath, ...args
+    ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${path.basename(filePath)} exited with code ${code ?? "?"}.`)));
+  });
 }
 
-function launchWindow() {
-  const edgePath = findEdge();
-  if (!edgePath) throw new Error("Microsoft Edge was not found. DevRelay GUI requires Edge app mode.");
-  const profile = path.join(stateDir, "gui-edge-profile");
+async function launchWindow() {
+  await runPowerShellFile(hostSetupPath, ["-Root", webView2Root]);
+  const profile = path.join(stateDir, "gui-webview2-profile");
   const url = `http://127.0.0.1:${guiPort}/`;
-  const args = [
-    `--app=${url}`,
-    `--user-data-dir=${profile}`,
-    "--window-size=900,620",
-    "--no-first-run",
-    "--disable-background-mode",
-    "--disable-extensions",
-    "--disable-features=msEdgeSidebarV2"
-  ];
   windowLaunchedAt = Date.now();
   lastHeartbeatAt = 0;
-  edge = spawn(edgePath, args, { windowsHide: false, stdio: "ignore" });
-  edge.once("exit", () => { edge = null; });
-  edge.once("error", (error) => {
-    pushLog(pluginLogs, `[GUI] Edge launch failed: ${error.message}`, "error");
+  windowHost = spawn("powershell.exe", [
+    "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta",
+    "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile
+  ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+  windowHost.once("exit", () => {
+    windowHost = null;
+    if (!shuttingDown) void shutdown("GUI window closed");
+  });
+  windowHost.once("error", (error) => {
+    pushLog(pluginLogs, `[GUI] Window launch failed: ${error.message}`, "error");
     void shutdown("GUI launch failed");
   });
 }
@@ -344,7 +346,7 @@ async function shutdown(reason) {
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
   await stopRuntime(reason);
   await new Promise((resolve) => server.close(resolve));
-  if (edge?.pid) await taskkill(edge.pid);
+  if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);
 }
 
@@ -372,5 +374,8 @@ server.on("error", (error) => {
 
 server.listen(guiPort, "127.0.0.1", () => {
   pushLog(pluginLogs, `[GUI] DevRelay control window ready on 127.0.0.1:${guiPort}`);
-  launchWindow();
+  void launchWindow().catch((error) => {
+    pushLog(pluginLogs, `[GUI] Window launch failed: ${error.message}`, "error");
+    void shutdown("GUI launch failed");
+  });
 });

@@ -147,7 +147,7 @@ For normal Windows use, two no-argument launchers are provided:
 - `DevRelay ChatGPT.cmd` opens the local control GUI in OpenAI Secure MCP Tunnel mode.
 - `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL.
 
-The compact Edge app-mode window stays visible while DevRelay is available. Its top-right red button starts/stops the server without closing the GUI, the left side separates AI command activity from MCP/tunnel logs, and settings live at bottom right. Closing the GUI stops DevRelay and its tunnel. Machine-local tunnel settings and credentials remain excluded from Git.
+A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. Settings stay hidden until the gear button is pressed. Closing the GUI stops DevRelay and its tunnel. Machine-local tunnel settings, WebView2 cache files, and credentials remain excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
 
