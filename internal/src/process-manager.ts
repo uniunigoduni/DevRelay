@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { OutputBuffer } from "./output-buffer.js";
+import { writeAudit } from "./audit-log.js";
 import type { CommandSpec, ProcessSnapshot, ShellMode } from "./types.js";
 
 const DEFAULT_PROCESS_BUFFER_CHARS = 1_048_576;
@@ -39,6 +40,7 @@ export class ProcessManager {
 
   async execute(spec: CommandSpec, options: ExecuteOptions = {}) {
     const maxOutputChars = options.maxOutputChars ?? DEFAULT_EXEC_OUTPUT_CHARS;
+    writeAudit("exec.start", { command: spec.command, cwd: spec.cwd ?? null, shell: spec.shell ?? "auto" });
     const session = await this.spawnSession(spec, maxOutputChars, false);
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
@@ -61,6 +63,8 @@ export class ProcessManager {
     const stdout = output.events.filter((event) => event.stream === "stdout").map((event) => event.text).join("");
     const stderr = output.events.filter((event) => event.stream === "stderr").map((event) => event.text).join("");
 
+    writeAudit("exec.end", { command: spec.command, exitCode: session.exitCode, timedOut });
+
     return {
       ok: session.exitCode === 0 && !timedOut,
       exitCode: session.exitCode,
@@ -77,6 +81,7 @@ export class ProcessManager {
   async start(spec: CommandSpec, maxBufferChars = DEFAULT_PROCESS_BUFFER_CHARS): Promise<ProcessSnapshot> {
     const session = await this.spawnSession(spec, maxBufferChars, true);
     this.sessions.set(session.id, session);
+    writeAudit("process.start", { processId: session.id, pid: session.pid, command: spec.command, cwd: spec.cwd ?? null, shell: spec.shell ?? "auto" });
     return this.snapshot(session);
   }
 
@@ -118,6 +123,7 @@ export class ProcessManager {
     }
 
     const snapshot = this.snapshot(session);
+    writeAudit("process.stop", { processId: session.id, pid: session.pid, command: session.command, exitCode: session.exitCode });
     this.sessions.delete(id);
     return snapshot;
   }
@@ -198,6 +204,7 @@ export class ProcessManager {
       resolveExit();
 
       if (retain) {
+        writeAudit("process.exit", { processId: session.id, pid: session.pid, command: session.command, exitCode: code, signal });
         session.cleanupTimer = setTimeout(() => this.sessions.delete(session.id), COMPLETED_RETENTION_MS);
         session.cleanupTimer.unref();
       }

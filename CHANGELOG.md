@@ -2,6 +2,26 @@
 
 All notable changes to DevRelay are documented here.
 
+## Unreleased
+
+### Added
+
+- Added `DevRelay ChatGPT.cmd` and `DevRelay HTTPS.cmd` as the two user-facing Windows launchers.
+- Added a compact local Edge app-mode control GUI with a top-right Start/Stop control.
+- Added separate AI command activity and MCP/tunnel server log views.
+- Added local GUI settings for connection mode, MCP port, and launch-time auto-start.
+- Added command audit events for `exec` and managed processes without recording stdin contents.
+- Added Cloudflare Named Tunnel support with a fixed hostname and machine-local configuration.
+- Added GUI heartbeat shutdown: closing or losing the visible GUI stops DevRelay and the tunnel.
+- Added same-origin guards for state-changing local GUI API calls.
+- Added Material 3 Expressive-inspired launcher styling based on the `nas-photo` design language.
+- Added custom overlay scrollbars based on the `vault-edit` scrollbar interaction model.
+
+### Changed
+
+- Windows launchers no longer keep a terminal window open during normal use.
+- Named Tunnel origin Host is pinned to localhost so DevRelay Host validation remains enabled.
+- Machine-local tunnel credentials, GUI settings, logs, and generated state remain excluded from Git.
 ## 0.1.0 - 2026-09-20
 
 ### Added
@@ -14,22 +34,3 @@ All notable changes to DevRelay are documented here.
 - Windows process-tree termination and POSIX process-group termination.
 - Node built-in test suite and MCP Inspector smoke-test instructions.
 - Architecture, tool, transport, development, security, design, and Japanese quick-start documentation.
-
-## Unreleased
-
-### Added
-
-- Windows launcher implementation moved to `scripts/DevRelay-Launcher.ps1`; user-facing entry points are `DevRelay ChatGPT.cmd` and `DevRelay HTTPS.cmd`.
-- Incremental first-run preparation with `npm ci` and source-staleness-aware builds.
-- Automatic download and SHA-256 verification of the latest official OpenAI `tunnel-client` Windows bundle.
-- Secure MCP Tunnel profile creation, `doctor` validation, and joint process supervision.
-- Windows DPAPI storage for the tunnel runtime API key.
-- Launcher status, setup-only, local-only, force-setup, tunnel-reset, and port options.
-- Launcher documentation in English and Japanese quick-start documentation.
-
-## Unreleased
-
-- Added `DevRelay ChatGPT.cmd` for one-click OpenAI Secure MCP Tunnel startup.
-- Added `DevRelay HTTPS.cmd` for one-click Cloudflare Named Tunnel startup with a fixed hostname.
-- HTTPS mode copies the fixed public MCP URL to the clipboard.
-- Named Tunnel origin Host is pinned to localhost so DevRelay Host validation remains enabled.

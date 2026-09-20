@@ -17,7 +17,7 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
 - Process-tree termination on Windows.
-- No database, agent loop, web UI, PTY, or built-in tunnel.
+- The MCP core has no database, agent loop, PTY, or embedded tunnel. The Windows launcher UI is a separate local controller.
 - Three runtime dependencies only: the MCP server SDK, its Node adapter, and Zod.
 
 ## Requirements
@@ -136,10 +136,10 @@ The implementation patterns and interoperability references used for v0.1 are do
 
 For normal Windows use, two no-argument launchers are provided:
 
-- `DevRelay ChatGPT.cmd` starts the existing OpenAI Secure MCP Tunnel mode.
-- `DevRelay HTTPS.cmd` starts the configured Cloudflare Named Tunnel and uses a fixed public HTTPS MCP URL.
+- `DevRelay ChatGPT.cmd` opens the local control GUI in OpenAI Secure MCP Tunnel mode.
+- `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL.
 
-HTTPS mode prints and copies the fixed MCP URL configured in `internal/.devrelay/https-named.json`. The machine-local Cloudflare tunnel credentials and hostname are excluded from Git.
+The compact Edge app-mode window stays visible while DevRelay is available. Its top-right red button starts/stops the server without closing the GUI, the left side separates AI command activity from MCP/tunnel logs, and settings live at bottom right. Closing the GUI stops DevRelay and its tunnel. Machine-local tunnel settings and credentials remain excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
 

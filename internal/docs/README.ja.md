@@ -37,13 +37,13 @@ devrelay --http
 
 ## v0.1で意図的に持たないもの
 
-PTY、GUI、Webダッシュボード、DB、Git専用API、ファイル専用API、Docker専用API、組み込みトンネル、LLM/エージェント機能は含みません。CLIで表現できる操作はCLIに任せる方針です。
+MCPコアにはPTY、DB、Git専用API、ファイル専用API、Docker専用API、組み込みトンネル、LLM/エージェント機能を含めません。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。CLIで表現できる操作はCLIに任せます。
 
 ## Windowsでは2つのランチャーを使う
 
 通常は用途に応じて、プロジェクト直下の `DevRelay ChatGPT.cmd` または `DevRelay HTTPS.cmd` をダブルクリックします。
 
-- `DevRelay ChatGPT.cmd`: OpenAI Secure MCP Tunnel経由で起動します。
-- `DevRelay HTTPS.cmd`: Cloudflare Named Tunnelで固定HTTPS MCP URLを起動します。
+- `DevRelay ChatGPT.cmd`: GUIをOpenAI Secure MCP Tunnelモードで開きます。
+- `DevRelay HTTPS.cmd`: GUIをCloudflare Named Tunnelモードで開きます。
 
-どちらも必要に応じてnpm依存関係の確認とビルドを自動で行います。共通処理は `scripts/DevRelay-Launcher.ps1` にまとめてあり、通常ユーザーが直接実行する必要はありません。旧 `DevRelay.cmd` は整理のため削除しました。詳細は [launcher.md](launcher.md) を参照してください。
+GUIは小さめのEdgeアプリモードで表示され、右上の赤いStart/Stop、左側のAIコマンドログとMCP/トンネルログ、右下の設定を提供します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。
