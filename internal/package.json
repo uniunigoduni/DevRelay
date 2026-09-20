@@ -1,0 +1,31 @@
+{
+  "name": "devrelay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A minimal MCP bridge for arbitrary command-line execution on a development machine.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "devrelay": "dist/src/main.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "start": "node dist/src/main.js",
+    "start:http": "node dist/src/main.js --http",
+    "launch": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\DevRelay-Launcher.ps1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  }
+}

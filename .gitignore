@@ -1,0 +1,10 @@
+internal/node_modules/
+internal/dist/
+internal/.devrelay/
+internal/tools/tunnel-client/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
