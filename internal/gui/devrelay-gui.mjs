@@ -121,7 +121,7 @@ function formatAudit(event) {
   if (event.event === "exec.end") {
     return `↳ exec finished  exit=${event.exitCode ?? "?"}${event.timedOut ? "  timeout" : ""}`;
   }
-  if (event.event === "process.start") return `▶ process  ${event.command}  [${event.processId}]`;
+  if (event.event === "process.start") return `${event.terminal ? "▶ terminal" : "▶ process"}  ${event.command}  [${event.processId}]`;
   if (event.event === "process.exit") return `↳ process exited  exit=${event.exitCode ?? "?"}  [${event.processId}]`;
   if (event.event === "process.stop") return `■ process stopped  [${event.processId}]`;
   return `${event.event}`;

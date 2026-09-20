@@ -16,6 +16,10 @@ Run DevRelay as the account whose development files and tools it should access. 
 
 `shell: "auto"`, `cmd`, `powershell`, and `pwsh` intentionally allow shell syntax. `shell: "direct"` bypasses shell parsing and is preferable when the executable and arguments are already structured.
 
+## PTY and image access
+
+PTY sessions run with the same OS identity and environment privileges as ordinary child processes. Image attachment paths are also read with that identity; they are not restricted to the project directory. This does not grant a caller more authority than arbitrary command execution already provides, but it makes local image bytes directly returnable through MCP.
+
 ## Process state
 
 Managed process metadata and buffered output live only in memory. The Windows GUI writes a machine-local current-session audit file under `.devrelay/` containing command/process lifecycle metadata so the user can see AI command activity. It does not record stdin or command stdout/stderr in that audit file, and the file is truncated on the next GUI runtime start. Completed managed-process output is retained in memory for 10 minutes by default.

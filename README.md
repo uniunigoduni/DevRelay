@@ -13,12 +13,12 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 - MCP over stdio.
 - MCP over Streamable HTTP.
 - Arbitrary one-shot command execution.
-- Managed long-running processes with stdin/stdout/stderr.
+- Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
 - Process-tree termination on Windows.
-- The MCP core has no database, agent loop, PTY, or embedded tunnel. The Windows launcher UI is a separate local controller.
-- Three runtime dependencies only: the MCP server SDK, its Node adapter, and Zod.
+- The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher UI is a separate local controller.
+- Four direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, and `node-pty` for PTY/ConPTY.
 
 ## Requirements
 
@@ -79,10 +79,10 @@ The normal remote-access pattern is to keep DevRelay bound to loopback and place
 
 | Tool | Purpose |
 | --- | --- |
-| `exec` | Run a command to completion and collect stdout/stderr. |
-| `process_start` | Start a long-running managed process. |
-| `process_read` | Read process output incrementally with a cursor. |
-| `process_write` | Send text to process stdin and optionally close stdin. |
+| `exec` | Run a command to completion, collect stdout/stderr, and optionally return images. |
+| `process_start` | Start a long-running pipe process or PTY/ConPTY terminal session. |
+| `process_read` | Read process output incrementally and optionally return images. |
+| `process_write` | Send input; PTY sessions can also be resized. |
 | `process_stop` | Stop a managed process tree and forget it. |
 | `process_list` | List processes currently retained by DevRelay. |
 
@@ -97,6 +97,14 @@ There are intentionally no Git, filesystem, Docker, package-manager, or search-s
 - `direct`: execute `command` directly and pass the optional `args` array without a shell.
 
 `direct` is the best choice when the executable and arguments are already known because it avoids another shell parser.
+
+## Terminal sessions
+
+Set `terminal: true` on `process_start` when a CLI owns the terminal or uses a TUI. DevRelay allocates a PTY/ConPTY and keeps that terminal independent from other managed processes, so an interactive CLI can remain open while additional commands run in parallel sessions. `process_write` sends keystrokes/data and can resize the terminal with `columns` + `rows`.
+
+## Image output
+
+`exec.images` and `process_read.images` can attach up to four PNG, JPEG, WebP, or GIF files to the MCP result. This lets ordinary CLIs or browser automation create screenshots while DevRelay only handles the final pixel transport to the MCP client.
 
 ## Managed-process workflow
 

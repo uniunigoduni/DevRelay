@@ -21,6 +21,9 @@ export interface ProcessSnapshot {
   command: string;
   cwd?: string;
   shell: ShellMode;
+  terminal: boolean;
+  columns: number | null;
+  rows: number | null;
   running: boolean;
   exitCode: number | null;
   signal: NodeJS.Signals | null;

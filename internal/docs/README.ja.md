@@ -31,13 +31,13 @@ devrelay --http
 
 ## 基本的な使い分け
 
-短時間で終了するコマンドは `exec`、開発サーバーやREPLのような長時間プロセスは `process_start` を使います。長時間プロセスの出力は `process_read` の `nextCursor` を次回の `cursor` に渡すことで差分だけ取得できます。
+短時間で終了するコマンドは `exec`、開発サーバーやREPLのような長時間プロセスは `process_start` を使います。Codex CLIやTUIのように端末を占有するプログラムは `terminal: true` でPTY/ConPTYセッションとして起動できます。複数セッションは同時に保持できます。長時間プロセスの出力は `process_read` の `nextCursor` を次回の `cursor` に渡すことで差分だけ取得できます。
 
-`process_write` はstdin入力、`process_stop` はプロセスツリー停止、`process_list` はDevRelayが保持中のセッション一覧です。
+`process_write` はstdin/PTY入力とPTYサイズ変更、`process_stop` はセッション停止、`process_list` はDevRelayが保持中のセッション一覧です。`exec.images` と `process_read.images` を使うと、CLIが生成・参照したPNG/JPEG/WebP/GIFをMCP画像として返せます。
 
 ## v0.1で意図的に持たないもの
 
-MCPコアにはPTY、DB、Git専用API、ファイル専用API、Docker専用API、組み込みトンネル、LLM/エージェント機能を含めません。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。CLIで表現できる操作はCLIに任せます。
+MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一般的なGUI自動操作API、組み込みトンネル、LLM/エージェント機能を含めません。PTY/ConPTYと画像返却は、CLIだけでは不足する部分を既存6ツールのオプションとして最小限補完します。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。
 
 ## Windowsでは2つのランチャーを使う
 

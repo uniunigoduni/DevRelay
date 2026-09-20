@@ -16,6 +16,10 @@ All notable changes to DevRelay are documented here.
 - Added same-origin guards for state-changing local GUI API calls.
 - Added Material 3 Expressive-inspired launcher styling based on the `nas-photo` design language.
 - Added custom overlay scrollbars based on the `vault-edit` scrollbar interaction model.
+- Added opt-in PTY/ConPTY managed sessions through `process_start(terminal: true)` while keeping the six-tool MCP surface.
+- Added terminal resizing through `process_write` and terminal state in process snapshots.
+- Added PNG/JPEG/WebP/GIF result attachments through `exec.images` and `process_read.images`.
+- Added `node-pty` as the single native dependency required for real terminal sessions.
 
 ### Changed
 

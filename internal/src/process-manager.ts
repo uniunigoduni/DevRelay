@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn as spawnPty, type IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { OutputBuffer } from "./output-buffer.js";
@@ -10,7 +11,8 @@ const DEFAULT_EXEC_OUTPUT_CHARS = 524_288;
 const COMPLETED_RETENTION_MS = 10 * 60 * 1000;
 
 interface SessionInternal extends ProcessSnapshot {
-  child: ChildProcessWithoutNullStreams;
+  child?: ChildProcessWithoutNullStreams;
+  pty?: IPty;
   buffer: OutputBuffer;
   activity: EventEmitter;
   exitPromise: Promise<void>;
@@ -35,6 +37,14 @@ export interface ReadOptions {
   waitMs?: number;
 }
 
+export interface StartOptions {
+  terminal?: boolean;
+  columns?: number;
+  rows?: number;
+}
+
+export interface TerminalResize { columns: number; rows: number; }
+
 export class ProcessManager {
   private readonly sessions = new Map<string, SessionInternal>();
 
@@ -45,6 +55,7 @@ export class ProcessManager {
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
 
+    if (!session.child) throw new Error("Internal error: exec session has no child process.");
     if (options.stdin !== undefined) session.child.stdin.end(options.stdin);
     else session.child.stdin.end();
 
@@ -78,10 +89,10 @@ export class ProcessManager {
     };
   }
 
-  async start(spec: CommandSpec, maxBufferChars = DEFAULT_PROCESS_BUFFER_CHARS): Promise<ProcessSnapshot> {
-    const session = await this.spawnSession(spec, maxBufferChars, true);
+  async start(spec: CommandSpec, maxBufferChars = DEFAULT_PROCESS_BUFFER_CHARS, options: StartOptions = {}): Promise<ProcessSnapshot> {
+    const session = await this.spawnSession(spec, maxBufferChars, true, options);
     this.sessions.set(session.id, session);
-    writeAudit("process.start", { processId: session.id, pid: session.pid, command: spec.command, cwd: spec.cwd ?? null, shell: spec.shell ?? "auto" });
+    writeAudit("process.start", { processId: session.id, pid: session.pid, command: spec.command, cwd: spec.cwd ?? null, shell: spec.shell ?? "auto", terminal: session.terminal });
     return this.snapshot(session);
   }
 
@@ -100,17 +111,29 @@ export class ProcessManager {
     };
   }
 
-  async write(id: string, data: string, end = false) {
+  async write(id: string, data: string, end = false, resize?: TerminalResize) {
     const session = this.requireSession(id);
     if (!session.running) throw new Error(`Process ${id} is not running.`);
 
+    if (session.terminal) {
+      if (!session.pty) throw new Error(`Terminal process ${id} is unavailable.`);
+      if (end) throw new Error("end=true is not supported for terminal sessions; use process_stop.");
+      if (resize) {
+        session.pty.resize(resize.columns, resize.rows);
+        session.columns = resize.columns;
+        session.rows = resize.rows;
+      }
+      if (data) session.pty.write(data);
+      return { bytes: Buffer.byteLength(data), ended: false, terminal: true, columns: session.columns, rows: session.rows };
+    }
+
+    if (!session.child) throw new Error(`Process ${id} has no stdin.`);
     await new Promise<void>((resolve, reject) => {
       const callback = (error?: Error | null) => error ? reject(error) : resolve();
-      if (end) session.child.stdin.end(data, callback);
-      else session.child.stdin.write(data, callback);
+      if (end) session.child!.stdin.end(data, callback);
+      else session.child!.stdin.write(data, callback);
     });
-
-    return { bytes: Buffer.byteLength(data), ended: end };
+    return { bytes: Buffer.byteLength(data), ended: end, terminal: false };
   }
 
   async stop(id: string, force = true): Promise<ProcessSnapshot> {
@@ -118,7 +141,11 @@ export class ProcessManager {
     if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
 
     if (session.running) {
-      await this.killTree(session.pid, force);
+      if (session.terminal && session.pty) {
+        try { session.pty.kill(process.platform === "win32" ? undefined : (force ? "SIGKILL" : "SIGTERM")); } catch { /* already gone */ }
+      } else {
+        await this.killTree(session.pid, force);
+      }
       await Promise.race([session.exitPromise, this.sleep(3000)]);
     }
 
@@ -143,54 +170,57 @@ export class ProcessManager {
     }));
   }
 
-  private async spawnSession(spec: CommandSpec, maxBufferChars: number, retain: boolean): Promise<SessionInternal> {
+  private async spawnSession(
+    spec: CommandSpec,
+    maxBufferChars: number,
+    retain: boolean,
+    options: StartOptions = {}
+  ): Promise<SessionInternal> {
     const invocation = this.resolveInvocation(spec);
-    const child = spawn(invocation.file, invocation.args, {
-      cwd: spec.cwd,
-      env: { ...process.env, ...spec.env },
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      detached: process.platform !== "win32"
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-
     const buffer = new OutputBuffer(maxBufferChars);
     const activity = new EventEmitter();
     const startedAt = new Date().toISOString();
     let resolveExit!: () => void;
     const exitPromise = new Promise<void>((resolve) => { resolveExit = resolve; });
+    const terminal = options.terminal === true;
+    const columns = terminal ? (options.columns ?? 120) : null;
+    const rows = terminal ? (options.rows ?? 30) : null;
+
+    let child: ChildProcessWithoutNullStreams | undefined;
+    let pty: IPty | undefined;
+    let pid: number;
+
+    if (terminal) {
+      pty = spawnPty(invocation.file, invocation.args, {
+        name: "xterm-256color",
+        cols: columns!,
+        rows: rows!,
+        cwd: spec.cwd ?? process.cwd(),
+        env: { ...process.env, ...spec.env },
+        useConpty: process.platform === "win32"
+      });
+      pid = pty.pid;
+    } else {
+      child = spawn(invocation.file, invocation.args, {
+        cwd: spec.cwd,
+        env: { ...process.env, ...spec.env },
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        detached: process.platform !== "win32"
+      });
+      await new Promise<void>((resolve, reject) => {
+        child!.once("spawn", resolve);
+        child!.once("error", reject);
+      });
+      pid = child.pid!;
+    }
 
     const session: SessionInternal = {
-      id: `p_${randomUUID()}`,
-      pid: child.pid!,
-      command: spec.command,
-      cwd: spec.cwd,
-      shell: invocation.shell,
-      running: true,
-      exitCode: null,
-      signal: null,
-      startedAt,
-      endedAt: null,
-      child,
-      buffer,
-      activity,
-      exitPromise
+      id: `p_${randomUUID()}`, pid, command: spec.command, cwd: spec.cwd,
+      shell: invocation.shell, terminal, columns, rows, running: true,
+      exitCode: null, signal: null, startedAt, endedAt: null,
+      child, pty, buffer, activity, exitPromise
     };
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (text: string) => {
-      buffer.push("stdout", text);
-      activity.emit("activity");
-    });
-    child.stderr.on("data", (text: string) => {
-      buffer.push("stderr", text);
-      activity.emit("activity");
-    });
 
     let finalized = false;
     const finalize = (code: number | null, signal: NodeJS.Signals | null) => {
@@ -202,19 +232,27 @@ export class ProcessManager {
       session.endedAt = new Date().toISOString();
       activity.emit("activity");
       resolveExit();
-
       if (retain) {
-        writeAudit("process.exit", { processId: session.id, pid: session.pid, command: session.command, exitCode: code, signal });
+        writeAudit("process.exit", { processId: session.id, pid: session.pid, command: session.command, exitCode: code, signal, terminal });
         session.cleanupTimer = setTimeout(() => this.sessions.delete(session.id), COMPLETED_RETENTION_MS);
         session.cleanupTimer.unref();
       }
     };
 
-    child.once("exit", finalize);
-    child.once("error", (error) => {
-      buffer.push("stderr", `[DevRelay process error] ${error.message}\n`);
-      finalize(child.exitCode, child.signalCode);
-    });
+    if (pty) {
+      pty.onData((text) => { buffer.push("stdout", text); activity.emit("activity"); });
+      pty.onExit(({ exitCode }) => finalize(exitCode, null));
+    } else if (child) {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (text: string) => { buffer.push("stdout", text); activity.emit("activity"); });
+      child.stderr.on("data", (text: string) => { buffer.push("stderr", text); activity.emit("activity"); });
+      child.once("exit", finalize);
+      child.once("error", (error) => {
+        buffer.push("stderr", `[DevRelay process error] ${error.message}\n`);
+        finalize(child!.exitCode, child!.signalCode);
+      });
+    }
 
     return session;
   }
@@ -274,6 +312,9 @@ export class ProcessManager {
       command: session.command,
       cwd: session.cwd,
       shell: session.shell,
+      terminal: session.terminal,
+      columns: session.columns,
+      rows: session.rows,
       running: session.running,
       exitCode: session.exitCode,
       signal: session.signal,

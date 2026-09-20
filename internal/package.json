@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/test/*.test.js",
+    "test": "npm run build && node --test --test-force-exit dist/test/*.test.js",
     "start": "node dist/src/main.js",
     "start:http": "node dist/src/main.js --http",
     "launch": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\DevRelay-Launcher.ps1",
@@ -24,6 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "node-pty": "^1.1.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
