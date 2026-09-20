@@ -12,6 +12,7 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 
 - MCP over stdio.
 - MCP over Streamable HTTP.
+- OAuth 2.1 Authorization Code + PKCE with DCR for the public HTTPS Named Tunnel launcher.
 - Arbitrary one-shot command execution.
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
@@ -145,9 +146,9 @@ The implementation patterns and interoperability references used for v0.1 are do
 For normal Windows use, two no-argument launchers are provided:
 
 - `DevRelay ChatGPT.cmd` opens the local control GUI in OpenAI Secure MCP Tunnel mode.
-- `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL.
+- `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL protected by OAuth 2.1.
 
-A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. The window controls use the same Segoe Fluent Icons glyph pattern as `audio-router`. The UI uses Noto Sans Mono and supports the exact `#FFFFFF Soft` (default) and `#000000 Soft` palettes from `vault-edit`. Settings stay hidden until the gear button is pressed. Closing the GUI stops DevRelay and its tunnel. Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, and credentials remain under `.devrelay` and excluded from Git.
+A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. The window controls use the same Segoe Fluent Icons glyph pattern as `audio-router`. The UI uses Noto Sans Mono and supports the exact `#FFFFFF Soft` (default) and `#000000 Soft` palettes from `vault-edit`. Settings stay hidden until the gear button is pressed; an incoming OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its tunnel. Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, and credentials remain under `.devrelay` and excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
 

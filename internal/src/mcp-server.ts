@@ -5,6 +5,7 @@ import { loadImageContents } from "./image-content.js";
 import type { CommandSpec } from "./types.js";
 
 const shellSchema = z.enum(["auto", "cmd", "powershell", "pwsh", "direct"]);
+const oauthToolMeta = { securitySchemes: [{ type: "oauth2", scopes: ["devrelay"] }] };
 const commandSchema = z.object({
   command: z.string().min(1).describe("Shell command, or executable path when shell=direct."),
   args: z.array(z.string()).optional().describe("Arguments for shell=direct only."),
@@ -54,6 +55,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "exec",
     {
       description: "Run a command to completion and return stdout/stderr metadata, with optional MCP image attachments.",
+      _meta: oauthToolMeta,
       inputSchema: commandSchema.extend({
         stdin: z.string().optional().describe("Optional stdin content. stdin is closed after this content is sent."),
         timeoutMs: z.number().int().positive().max(86_400_000).optional().describe("Kill the command after this many milliseconds."),
@@ -75,6 +77,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "process_start",
     {
       description: "Start a long-running managed process. Set terminal=true for a PTY/ConPTY session; multiple sessions may coexist.",
+      _meta: oauthToolMeta,
       inputSchema: commandSchema.extend({
         maxBufferChars: z.number().int().min(16_384).max(8_000_000).optional().describe("Rolling output buffer size. Default 1048576 characters."),
         terminal: z.boolean().optional().default(false).describe("Run in a PTY/ConPTY for interactive terminal applications."),
@@ -91,6 +94,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "process_read",
     {
       description: "Read retained process/terminal output incrementally and optionally attach image files. Reuse nextCursor for only new output.",
+      _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
         cursor: z.number().int().nonnegative().optional().default(0),
@@ -111,6 +115,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "process_write",
     {
       description: "Write data to a managed pipe or PTY session. PTY sessions can also be resized with columns and rows.",
+      _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
         data: z.string().default(""),
@@ -130,6 +135,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "process_stop",
     {
       description: "Stop a managed process tree and remove it from the registry.",
+      _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
         force: z.boolean().optional().default(true)
@@ -142,6 +148,7 @@ export function createDevRelayServer(manager: ProcessManager): McpServer {
     "process_list",
     {
       description: "List processes started by DevRelay. Completed processes remain visible briefly so their output can still be read.",
+      _meta: oauthToolMeta,
       inputSchema: z.object({})
     },
     async () => textResult(manager.list())

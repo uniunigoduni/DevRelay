@@ -9,7 +9,14 @@ const saveSettings = $("#saveSettings");
 const settingsMessage = $("#settingsMessage");
 const publicUrl = $("#publicUrl");
 const settingsBackdrop = $("#settingsBackdrop");
+const oauthApproval = $("#oauthApproval");
+const oauthClientName = $("#oauthClientName");
+const oauthRedirectHost = $("#oauthRedirectHost");
+const oauthScopes = $("#oauthScopes");
+const approveOAuth = $("#approveOAuth");
+const denyOAuth = $("#denyOAuth");
 
+let lastOAuthPendingId = null;
 let lastState = null;
 let lastAiCount = -1;
 let lastPluginCount = -1;
@@ -81,6 +88,20 @@ function render(state) {
   autoStartInput.disabled = active || transition;
   saveSettings.disabled = requestBusy;
 
+  const pendingOAuth = state.oauthPending?.[0] ?? null;
+  oauthApproval.hidden = !pendingOAuth;
+  if (pendingOAuth) {
+    oauthClientName.textContent = pendingOAuth.clientName || "OAuth client";
+    oauthRedirectHost.textContent = pendingOAuth.redirectHost || "unknown";
+    oauthScopes.textContent = (pendingOAuth.scopes || []).join(" ");
+    approveOAuth.disabled = requestBusy;
+    denyOAuth.disabled = requestBusy;
+    if (pendingOAuth.id !== lastOAuthPendingId) setSettingsOpen(true);
+    lastOAuthPendingId = pendingOAuth.id;
+  } else {
+    lastOAuthPendingId = null;
+  }
+
   if (state.aiLogs.length !== lastAiCount) {
     renderLog(aiLog, state.aiLogs, "No commands yet.");
     lastAiCount = state.aiLogs.length;
@@ -104,6 +125,20 @@ async function api(path, options = {}) {
 async function refresh() {
   try { render(await api("/api/state")); } catch {}
 }
+
+async function decideOAuth(approve) {
+  const pending = lastState?.oauthPending?.[0];
+  if (!pending || requestBusy) return;
+  requestBusy = true;
+  approveOAuth.disabled = true; denyOAuth.disabled = true;
+  try {
+    await api("/api/oauth/decision", { method: "POST", body: JSON.stringify({ id: pending.id, approve }) });
+  } catch (error) {
+    settingsMessage.textContent = error.message; settingsMessage.classList.add("error");
+  } finally { requestBusy = false; await refresh(); }
+}
+approveOAuth.addEventListener("click", () => { void decideOAuth(true); });
+denyOAuth.addEventListener("click", () => { void decideOAuth(false); });
 
 themeSelect.addEventListener("change", () => {
   settingsDirty = true;

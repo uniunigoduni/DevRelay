@@ -142,3 +142,27 @@ body.dragging-scroll-thumb { cursor: grabbing; user-select: none; }
   .settings-backdrop { padding: 7px; }
   .settings-panel { padding: 13px; }
 }
+.oauth-approval[hidden] { display: none; }
+.oauth-approval {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--window-radius);
+  background: var(--surface);
+}
+.oauth-kicker {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.oauth-approval strong { display: block; font-size: 12px; margin-bottom: 9px; }
+.oauth-detail { color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.oauth-detail code { color: var(--text); font: inherit; }
+.oauth-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.oauth-actions button { height: 32px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+#denyOAuth { background: transparent; color: var(--text); border: 1px solid var(--line); }
+#approveOAuth { background: var(--text); color: var(--bg); }
+.oauth-actions button:disabled { opacity: .4; cursor: default; }

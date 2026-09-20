@@ -12,6 +12,7 @@ All notable changes to DevRelay are documented here.
 - Added a gear-triggered settings panel for connection mode, MCP port, and launch-time auto-start.
 - Added command audit events for `exec` and managed processes without recording stdin contents.
 - Added Cloudflare Named Tunnel support with a fixed hostname and machine-local configuration.
+- Added OAuth 2.1 Authorization Code + PKCE, DCR, discovery metadata, rotating refresh tokens, and GUI-local approval for HTTPS mode.
 - Added GUI heartbeat shutdown: closing or losing the visible GUI stops DevRelay and the tunnel.
 - Added same-origin guards for state-changing local GUI API calls.
 - Added custom overlay scrollbars based on the `vault-edit` scrollbar interaction model.

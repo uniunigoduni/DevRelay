@@ -23,7 +23,7 @@ The custom window chrome follows the frameless WPF/glyph pattern used by `audio-
 
 ## HTTPS mode
 
-The GUI starts DevRelay on `127.0.0.1:7317` and launches the configured Cloudflare Named Tunnel. The fixed URL is read from `.devrelay/https-named.json`. Mutable launcher data is consolidated under `internal/.devrelay/`: tunnel state, GUI settings, WebView2 profile/SDK cache, optional font cache, and logs. Each visible window launch gets its own `logs/yyyyMMdd-HHmmss-xxxxxxxx/` directory with `command.log`, `server.log`, `audit.ndjson`, `session.json`, and the Cloudflare log; only the latest three visible launches are retained.
+The GUI starts DevRelay on `127.0.0.1:7317` and launches the configured Cloudflare Named Tunnel. HTTPS mode also enables OAuth 2.1; incoming authorization requests automatically open Settings so the local user can Approve or Deny the connection. The fixed URL is read from `.devrelay/https-named.json`. Mutable launcher data is consolidated under `internal/.devrelay/`: tunnel state, GUI settings, WebView2 profile/SDK cache, optional font cache, and logs. Each visible window launch gets its own `logs/yyyyMMdd-HHmmss-xxxxxxxx/` directory with `command.log`, `server.log`, `audit.ndjson`, `session.json`, and the Cloudflare log; only the latest three visible launches are retained.
 
 ## ChatGPT mode
 

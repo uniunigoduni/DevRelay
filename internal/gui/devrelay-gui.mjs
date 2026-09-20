@@ -84,6 +84,8 @@ let lastHeartbeatAt = 0;
 let auditSeen = 0;
 let autoStartPending = settings.autoStart;
 let publicUrl = await resolvePublicUrl(settings.mode);
+let oauthControlSecret = null;
+let oauthPending = [];
 const state = {
   running: false,
   starting: false,
@@ -144,6 +146,7 @@ function snapshot() {
     sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
+    oauthPending,
     aiLogs,
     pluginLogs
   };
@@ -204,12 +207,20 @@ async function startRuntime() {
   ];
   if (settings.mode === "https") args.push("-HttpsDirect");
 
+  oauthControlSecret = `${randomUUID()}${randomUUID()}`.replaceAll("-", "");
+  oauthPending = [];
+  const oauthEnv = settings.mode === "https" && publicUrl.startsWith("https://") ? {
+    DEVRELAY_OAUTH_ISSUER: new URL(publicUrl).origin,
+    DEVRELAY_OAUTH_RESOURCE: publicUrl,
+    DEVRELAY_OAUTH_CONTROL_SECRET: oauthControlSecret,
+    DEVRELAY_STATE_DIR: stateDir
+  } : {};
   pushLog(pluginLogs, `[GUI] Starting ${settings.mode.toUpperCase()} mode...`);
   runtime = spawn("powershell.exe", args, {
     cwd: internalRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
+    env: { ...process.env, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
   });
 
   runtime.stdout.setEncoding("utf8");
@@ -234,6 +245,8 @@ async function startRuntime() {
     state.starting = false;
     state.stopping = false;
     state.startedAt = null;
+    oauthControlSecret = null;
+    oauthPending = [];
   });
 }
 
@@ -271,7 +284,20 @@ async function stopRuntime(reason = "user") {
   state.starting = false;
   state.stopping = false;
   state.startedAt = null;
+  oauthControlSecret = null;
+  oauthPending = [];
 }
+
+async function pollOAuthPending() {
+  if (!runtime || !oauthControlSecret || settings.mode !== "https") { oauthPending = []; return; }
+  try {
+    const response = await fetch(`http://127.0.0.1:${settings.port}/oauth/internal/pending`, {
+      headers: { "x-devrelay-control-secret": oauthControlSecret }, cache: "no-store"
+    });
+    if (response.ok) oauthPending = (await response.json()).pending ?? [];
+  } catch {}
+}
+setInterval(() => { void pollOAuthPending(); }, 500).unref();
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
@@ -316,6 +342,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/stop") {
       await stopRuntime("button");
       return sendJson(res, 200, snapshot());
+    }
+    if (req.method === "POST" && url.pathname === "/api/oauth/decision") {
+      if (!oauthControlSecret || settings.mode !== "https") return sendJson(res, 409, { error: "OAuth runtime is not active." });
+      const body = await readJson(req);
+      const response = await fetch(`http://127.0.0.1:${settings.port}/oauth/internal/decision`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-devrelay-control-secret": oauthControlSecret },
+        body: JSON.stringify({ id: body.id, approve: body.approve === true })
+      });
+      const value = await response.json().catch(() => ({}));
+      if (!response.ok) return sendJson(res, response.status, value);
+      await pollOAuthPending();
+      return sendJson(res, 200, { ...value, state: snapshot() });
     }
     if (req.method === "POST" && url.pathname === "/api/settings") {
       const next = await readJson(req);

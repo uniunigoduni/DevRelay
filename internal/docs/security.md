@@ -6,7 +6,7 @@ DevRelay is intentionally powerful: an authorized MCP caller can execute arbitra
 
 HTTP mode binds to `127.0.0.1` by default. For loopback binds, DevRelay composes the MCP Node adapter's localhost Host and Origin validation in front of the MCP handler.
 
-Remote use should normally keep this loopback listener and place a trusted tunnel, private network, or authenticated gateway in front of it. DevRelay v0.1 does not implement user accounts, bearer-token validation, or TLS.
+Remote use keeps this loopback listener. The Windows HTTPS Named Tunnel launcher enables DevRelay OAuth 2.1 and requires a Bearer token on `/mcp`; raw local HTTP and stdio do not enable OAuth unless its environment is configured.
 
 ## Operating-system permissions
 
@@ -22,11 +22,11 @@ PTY sessions run with the same OS identity and environment privileges as ordinar
 
 ## Process state
 
-Managed process metadata and buffered output live only in memory. The Windows GUI writes a machine-local current-session audit file under `.devrelay/` containing command/process lifecycle metadata so the user can see AI command activity. It does not record stdin or command stdout/stderr in that audit file, and the file is truncated on the next GUI runtime start. Completed managed-process output is retained in memory for 10 minutes by default.
+Managed process metadata and buffered output live only in memory. Each visible Windows GUI launch writes a machine-local session under `.devrelay/logs/` with command lifecycle audit metadata and separate server/command logs; stdin is not recorded in the audit stream. Only the latest three visible GUI sessions are retained. Completed managed-process output is retained in memory for 10 minutes by default.
 
 ## Scope
 
-Security policy is deliberately kept separate from the command engine. Future authentication or policy layers should wrap the MCP transport or tool invocation boundary rather than complicating the ProcessManager core.
+Security policy remains separate from the command engine. HTTPS OAuth wraps the HTTP transport boundary instead of complicating the `ProcessManager` core.
 
 ## Visible control GUI
 
@@ -34,7 +34,7 @@ The Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changin
 
 ## Public HTTPS mode
 
-The configured Cloudflare Named Tunnel provides a stable public URL but does not by itself add application authentication. While HTTPS mode is running, the MCP endpoint should be treated as a powerful public command-execution endpoint. Keep the GUI visible, stop it when not in use, and add an authentication/policy layer before any unattended or permanent deployment.
+The Cloudflare Named Tunnel provides TLS and a stable public URL. DevRelay adds OAuth 2.1 Authorization Code + PKCE on top: discovery metadata, DCR, short-lived signed access tokens, and rotating refresh tokens. `/mcp` rejects missing or invalid Bearer tokens. OAuth consent is local: a public authorization request remains pending until the visible DevRelay GUI approves it with a per-runtime secret that is never exposed publicly.
 
 ## Launcher credentials
 

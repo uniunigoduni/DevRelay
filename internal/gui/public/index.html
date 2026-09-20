@@ -25,6 +25,16 @@
     </section>    <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
       <aside id="settingsPanel" class="settings-panel" aria-label="Settings">
         <h3>Settings</h3>
+        <section id="oauthApproval" class="oauth-approval" hidden>
+          <div class="oauth-kicker">OAuth access request</div>
+          <strong id="oauthClientName">ChatGPT</strong>
+          <div class="oauth-detail">Redirect: <code id="oauthRedirectHost"></code></div>
+          <div class="oauth-detail">Scopes: <code id="oauthScopes"></code></div>
+          <div class="oauth-actions">
+            <button id="denyOAuth" type="button">Deny</button>
+            <button id="approveOAuth" type="button">Approve</button>
+          </div>
+        </section>
         <label>Theme
           <select id="themeSelect">
             <option value="white-soft">#FFFFFF Soft</option>
