@@ -70,6 +70,7 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     authorize.searchParams.set("code_challenge_method", "S256");
     const authorizeResponse = await fetch(authorize);
     assert.equal(authorizeResponse.status, 200);
+    assert.match(authorizeResponse.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
     assert.match(await authorizeResponse.text(), /Waiting for local approval/);
     const duplicateAuthorizeResponse = await fetch(authorize);
     assert.equal(duplicateAuthorizeResponse.status, 200);
