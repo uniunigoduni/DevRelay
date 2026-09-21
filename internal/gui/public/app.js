@@ -74,9 +74,16 @@ window.DevRelayUi = {
   toggleSettings() { setSettingsOpen(!settingsBackdrop.classList.contains("open")); }
 };
 
-settingsBackdrop.addEventListener("click", (event) => {
-  if (event.target === settingsBackdrop) setSettingsOpen(false);
+let backdropPointerStartedOutside = false;
+settingsBackdrop.addEventListener("pointerdown", (event) => {
+  backdropPointerStartedOutside = event.target === settingsBackdrop;
 });
+settingsBackdrop.addEventListener("pointerup", (event) => {
+  const shouldClose = backdropPointerStartedOutside && event.target === settingsBackdrop;
+  backdropPointerStartedOutside = false;
+  if (shouldClose) setSettingsOpen(false);
+});
+settingsBackdrop.addEventListener("pointercancel", () => { backdropPointerStartedOutside = false; });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setSettingsOpen(false);
 });
@@ -164,7 +171,10 @@ themeSelect.addEventListener("change", () => {
   settingsDirty = true;
   document.documentElement.dataset.theme = themeSelect.value;
 });
-[deviceNameInput, deviceAliasesInput, modeSelect, portInput, autoStartInput].forEach((element) => {
+[deviceNameInput, deviceAliasesInput, portInput].forEach((element) => {
+  element.addEventListener("input", () => { settingsDirty = true; });
+});
+[modeSelect, autoStartInput].forEach((element) => {
   element.addEventListener("change", () => { settingsDirty = true; });
 });
 
