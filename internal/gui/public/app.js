@@ -59,8 +59,15 @@ function renderLog(element, entries, emptyText) {
 }
 
 function setSettingsOpen(open) {
+  const wasOpen = settingsBackdrop.classList.contains("open");
   settingsBackdrop.classList.toggle("open", open);
   settingsBackdrop.setAttribute("aria-hidden", String(!open));
+  if (wasOpen && !open && settingsDirty && lastState) {
+    settingsDirty = false;
+    settingsMessage.textContent = "";
+    settingsMessage.classList.remove("error");
+    render(lastState);
+  }
 }
 
 window.DevRelayUi = {

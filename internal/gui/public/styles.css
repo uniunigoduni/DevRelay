@@ -38,7 +38,7 @@ button, input, select { font: inherit; }
 button { border: 0; }
 
 .app {
-  position: relative; width: 100%; height: 100%; padding: 10px;
+  position: relative; width: 100%; height: 100%; padding: 0 10px 10px;
   overflow: hidden;
   border-radius: 0 0 var(--window-radius) var(--window-radius);
   background: var(--bg);
@@ -135,7 +135,7 @@ select:focus, input[type="number"]:focus { outline: 1px solid var(--accent); out
 body.dragging-scroll-thumb { cursor: grabbing; user-select: none; }
 
 @media (max-height: 500px) {
-  .app { padding: 7px; }
+  .app { padding: 0 7px 7px; }
   .logs { gap: 7px; }
   .log-card { grid-template-rows: 34px minmax(0,1fr); }
   .log-view { padding: 8px 10px 10px; font-size: 11px; }
