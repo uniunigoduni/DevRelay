@@ -30,7 +30,6 @@
           <strong id="oauthClientName">ChatGPT</strong>
           <div class="oauth-detail">Redirect: <code id="oauthRedirectHost"></code></div>
           <div class="oauth-detail">Scopes: <code id="oauthScopes"></code></div>
-          <div class="oauth-detail">Device: <code id="oauthDeviceName"></code></div>
           <div class="oauth-actions">
             <button id="denyOAuth" type="button">Deny</button>
             <button id="approveOAuth" type="button">Approve</button>
@@ -40,28 +39,11 @@
           <input id="deviceNameInput" type="text" maxlength="80" autocomplete="off">
         </label>
         <div class="device-default">Default <code id="deviceDefaultName">-</code></div>
-        <div class="device-default">Node <code id="deviceNodeId">-</code></div>
+        <div class="device-default">Status <code id="deviceStatus">-</code></div>
+        <div class="device-default">Node ID <code id="deviceNodeId">-</code></div>
         <label>Aliases
           <input id="deviceAliasesInput" type="text" maxlength="240" autocomplete="off" placeholder="dev, main">
         </label>
-        <div class="settings-section-title">Cluster</div>
-        <label class="toggle-row">
-          <span>Enable peer routing</span>
-          <input id="clusterEnabledInput" type="checkbox">
-        </label>
-        <label>Peer port
-          <input id="clusterPortInput" type="number" min="1" max="65535" step="1" inputmode="numeric">
-        </label>
-        <label>Peers
-          <textarea id="clusterPeersInput" rows="3" spellcheck="false" placeholder="http://100.64.0.2:7319"></textarea>
-        </label>
-        <label>Cluster key
-          <div class="cluster-key-row">
-            <input id="clusterKeyInput" type="password" autocomplete="off">
-            <button id="copyClusterKey" type="button">Copy</button>
-          </div>
-        </label>
-        <div class="cluster-note">Use the same key on every trusted DevRelay node.</div>
         <label>Theme
           <select id="themeSelect">
             <option value="white-soft">#FFFFFF Soft</option>

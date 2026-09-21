@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { ClusterRuntime } from "./cluster-runtime.js";
-import { loadDeviceIdentity } from "./device-identity.js";
 import { serveHttp, type HttpServerHandle } from "./http-server.js";
 import { createDevRelayServer } from "./mcp-server.js";
 import { ProcessManager } from "./process-manager.js";
+import { loadDeviceIdentity } from "./device-identity.js";
 
 const VERSION = "0.1.0";
+
 type Transport = "stdio" | "http";
 
 interface CliOptions {
@@ -39,8 +39,14 @@ function parseArgs(argv: string[]): CliOptions | null {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!;
-    if (arg === "--help" || arg === "-h") { console.log(usage()); return null; }
-    if (arg === "--version" || arg === "-v") { console.log(VERSION); return null; }
+    if (arg === "--help" || arg === "-h") {
+      console.log(usage());
+      return null;
+    }
+    if (arg === "--version" || arg === "-v") {
+      console.log(VERSION);
+      return null;
+    }
     if (arg === "--stdio") transport = "stdio";
     else if (arg === "--http") transport = "http";
     else if (arg === "--host") {
@@ -52,10 +58,14 @@ function parseArgs(argv: string[]): CliOptions | null {
       if (!value) throw new Error("--port requires a value.");
       port = Number(value);
       if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("--port must be an integer from 1 to 65535.");
-    } else throw new Error(`Unknown option: ${arg}`);
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
   }
+
   return { transport, host, port };
 }
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   if (!options) return;
@@ -63,10 +73,6 @@ async function main(): Promise<void> {
   const stateDir = process.env.DEVRELAY_STATE_DIR?.trim() || path.resolve(process.cwd(), ".devrelay");
   const manager = new ProcessManager();
   const identity = await loadDeviceIdentity(stateDir);
-  const runtime = await ClusterRuntime.create(manager, identity, stateDir);
-  runtime.setLocalHttpPort(options.transport === "http" ? options.port : undefined);
-  await runtime.start();
-
   let httpHandle: HttpServerHandle | undefined;
   let shuttingDown = false;
 
@@ -74,22 +80,22 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.error(`[DevRelay] shutting down (${signal})`);
-    if (httpHandle) await httpHandle.close();
-    await runtime.close();
     await manager.stopAll(true);
+    if (httpHandle) await httpHandle.close();
     process.exit(0);
   };
 
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-  console.error(`[DevRelay] device ${identity.name} (${identity.defaultName}) node=${identity.nodeId}`);
   if (options.transport === "http") {
-    httpHandle = await serveHttp(runtime, options.host, options.port);
+    console.error(`[DevRelay] device ${identity.name} (${identity.defaultName}) node=${identity.nodeId}`);
+    httpHandle = await serveHttp(manager, identity, options.host, options.port);
     return;
   }
 
-  void serveStdio(() => createDevRelayServer(runtime));
+  console.error(`[DevRelay] device ${identity.name} (${identity.defaultName}) node=${identity.nodeId}`);
+  void serveStdio(() => createDevRelayServer(manager, identity));
   console.error("[DevRelay] MCP serving over stdio");
 }
 

@@ -13,12 +13,12 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 - MCP over stdio.
 - MCP over Streamable HTTP.
 - OAuth 2.1 Authorization Code + PKCE with DCR for the public HTTPS Named Tunnel launcher.
-- Optional peer-to-peer multi-device routing with permanent node IDs and human-friendly device names.
 - Arbitrary one-shot command execution.
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
 - Process-tree termination on Windows.
+- Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
 - The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher UI is a separate local controller.
 - Four direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, and `node-pty` for PTY/ConPTY.
 
@@ -86,9 +86,13 @@ The normal remote-access pattern is to keep DevRelay bound to loopback and place
 | `process_read` | Read process output incrementally and optionally return images. |
 | `process_write` | Send input; PTY sessions can also be resized. |
 | `process_stop` | Stop a managed process tree and forget it. |
-| `process_list` | List the cluster device view plus retained processes. |
+| `process_list` | List processes currently retained by DevRelay. |
 
-`exec` and `process_start` accept an optional `device` selector. Managed process IDs carry their owning node, so later read/write/stop calls route automatically. There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`.
+There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`. Each result identifies the local DevRelay device; `process_list` returns that device plus its locally retained processes.
+
+## Multiple devices
+
+DevRelay does not federate or route between devices. Run one DevRelay per machine and register each public MCP endpoint as a separate ChatGPT plugin/connector. Give each machine a clear device name such as `windows-ryzen9-3900x` or `linux-rpi5`; the name is returned in tool results so the caller can confirm which registered endpoint answered. There is no peer API, cluster key, peer discovery, or cross-device process routing.
 
 ## Shell modes
 
@@ -125,7 +129,6 @@ Completed managed processes remain in memory for 10 minutes so their final outpu
 
 - [Architecture](internal/docs/architecture.md)
 - [Tool reference](internal/docs/tools.md)
-- [Device identity and peer cluster](internal/docs/cluster.md)
 - [Transports and remote access](internal/docs/transports.md)
 - [Development guide](internal/docs/development.md)
 - [Security model](internal/docs/security.md)
@@ -150,7 +153,7 @@ For normal Windows use, two no-argument launchers are provided:
 - `DevRelay ChatGPT.cmd` opens the local control GUI in OpenAI Secure MCP Tunnel mode.
 - `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL protected by OAuth 2.1.
 
-A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. The window controls use the same Segoe Fluent Icons glyph pattern as `audio-router`. The UI uses Noto Sans Mono and supports the exact `#FFFFFF Soft` (default) and `#000000 Soft` palettes from `vault-edit`. Settings stay hidden until the gear button is pressed; an incoming OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its tunnel. Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, and credentials remain under `.devrelay` and excluded from Git.
+A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. The window controls use the same Segoe Fluent Icons glyph pattern as `audio-router`. The UI uses Noto Sans Mono and supports the exact `#FFFFFF Soft` (default) and `#000000 Soft` palettes from `vault-edit`. Settings stay hidden until the gear button is pressed; the local device name/aliases can be edited while stopped, and an incoming OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its tunnel. Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, and credentials remain under `.devrelay` and excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
 

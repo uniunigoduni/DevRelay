@@ -56,7 +56,7 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     });
     assert.equal(registrationResponse.status, 201);
     const registration = await registrationResponse.json() as { client_id: string };
-    assert.match(registration.client_id, /^drc\.local\./);
+    assert.ok(registration.client_id.startsWith("drc_"));
 
     const verifier = randomBytes(48).toString("base64url");
     const authorize = new URL(`${base}/oauth/authorize`);

@@ -33,7 +33,7 @@ devrelay --http
 
 短時間で終了するコマンドは `exec`、開発サーバーやREPLのような長時間プロセスは `process_start` を使います。Codex CLIやTUIのように端末を占有するプログラムは `terminal: true` でPTY/ConPTYセッションとして起動できます。複数セッションは同時に保持できます。長時間プロセスの出力は `process_read` の `nextCursor` を次回の `cursor` に渡すことで差分だけ取得できます。
 
-`process_write` はstdin/PTY入力とPTYサイズ変更、`process_stop` はセッション停止、`process_list` はクラスタ内のデバイスのonline/offline状態と保持中セッションを返します。`exec` と `process_start` では `device` に表示名・自動名・alias・nodeIdを指定できます。`exec.images` と `process_read.images` を使うと、CLIが生成・参照したPNG/JPEG/WebP/GIFをMCP画像として返せます。
+`process_write` はstdin/PTY入力とPTYサイズ変更、`process_stop` はセッション停止、`process_list` はDevRelayが保持中のセッション一覧です。`exec.images` と `process_read.images` を使うと、CLIが生成・参照したPNG/JPEG/WebP/GIFをMCP画像として返せます。
 
 ## v0.1で意図的に持たないもの
 
@@ -52,6 +52,4 @@ GUIはOS標準フレームを使わないWPF/WebView2ウィンドウで、既定
 
 ## 複数デバイス
 
-各ノードは変更されない `nodeId` と、人間向けの `name` / `defaultName` / `aliases` を持ちます。既定名はOSとハードウェアから生成され、このPCでは `windows-ryzen9-3900x` のような形式になります。Raspberry PiではCPU名よりボード名を優先し、例として `linux-rpi5` になります。
-
-中央DirectoryやGatewayは置きません。各ノードは既定7319番のpeer APIで直接通信し、同じ32-byte cluster keyでHMAC認証します。小規模構成ではSettingsのPeersへ各ノードのプライベートURLを相互に登録するフルメッシュを推奨します。複数PCが同じCloudflare Named Tunnelへconnectorとして参加すれば、ChatGPT側のMCP URLは1個のままです。詳細は [cluster.md](cluster.md) を参照してください。
+複数PCを使う場合は、DevRelay同士をクラスタ化せず、各デバイスのMCPエンドポイントをChatGPTへ別々のプラグイン/コネクタとして登録します。各DevRelayは永続`nodeId`、編集可能なデバイス名、ハードウェアから生成される`defaultName`、aliasesを持ち、ツール結果に自分自身のデバイス情報とオンライン状態を返します。peer API、cluster key、自動peer discovery、他端末へのprocess転送はありません。

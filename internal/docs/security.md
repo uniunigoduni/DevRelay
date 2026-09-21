@@ -42,8 +42,6 @@ The Windows launcher never writes `CONTROL_PLANE_API_KEY` as plaintext project c
 
 The Tunnel ID is not treated as a secret and is stored in `.devrelay/launcher.json`. Both launcher state and the downloaded tunnel-client bundle are excluded from Git.
 
-## Peer-cluster security
+## Multiple-device isolation
 
-Peer routing is disabled by default. When enabled, it uses a shared 32-byte cluster key and HMAC-SHA256 request authentication with timestamp and nonce replay checks. The key lives in `.devrelay/cluster.key`, is excluded from Git, and must be copied only to trusted DevRelay nodes. Changing the key requires stopping the affected nodes.
-
-Port 7319 is not a public management API. Keep it on a trusted LAN or private overlay network even though requests are authenticated. A peer authenticated with the cluster key has the same practical command-execution authority as the public MCP client.
+Each DevRelay instance is an independent security boundary. There is no shared cluster key, peer API, automatic trust propagation, or cross-device command forwarding. To use multiple machines, register each machine as a separate MCP plugin/connector and authorize that endpoint independently.

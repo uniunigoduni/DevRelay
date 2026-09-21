@@ -54,8 +54,6 @@ On first use the launcher downloads the official Windows bundle, materializes a 
 
 `DevRelay HTTPS.cmd` sets the public issuer/resource automatically. `/mcp` requires the `devrelay` scope and advertises `offline_access`. Authorization Code + PKCE (`S256`) and DCR are supported. The browser authorization page cannot grant access by itself; the request must be approved in the visible local GUI. OAuth clients, the signing key, and hashed refresh-token records live under `.devrelay/oauth/`.
 
-## Multi-node HTTPS endpoint
+## Multiple devices
 
-A small DevRelay cluster can use one public MCP hostname by running multiple connectors for the same Cloudflare Named Tunnel. Cloudflare may deliver consecutive requests to different machines; DevRelay uses node-prefixed process IDs and authenticated peer forwarding so process operations still reach the owning node. OAuth access-token verification uses a signing key derived from the shared cluster key, and owner-specific OAuth requests are forwarded over the peer network.
-
-The peer API is separate from the public MCP transport and listens on port 7319 by default. Configure peer URLs over a trusted LAN/private overlay rather than publishing that port directly. See [cluster.md](cluster.md).
+Use one endpoint per device and register each endpoint separately with the MCP client. For HTTPS Named Tunnel deployments, give each machine its own hostname/tunnel mapping. DevRelay does not proxy requests between machines and does not expose a peer-discovery port. A device that cannot be reached through its own registered endpoint is effectively offline to the client.

@@ -1,44 +1,91 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { ClusterRuntime } from "./cluster-runtime.js";
+import { ProcessManager } from "./process-manager.js";
+import { loadImageContents } from "./image-content.js";
+import type { CommandSpec } from "./types.js";
+import type { DeviceIdentity } from "./device-identity.js";
 
 const shellSchema = z.enum(["auto", "cmd", "powershell", "pwsh", "direct"]);
 const oauthToolMeta = { securitySchemes: [{ type: "oauth2", scopes: ["devrelay"] }] };
-
-const deviceField = z.string().min(1).optional().describe(
-  "Target device by user name, auto-generated default name, alias, node ID, or unique node-ID prefix. Omit to use the node that received this request."
-);
-
 const commandSchema = z.object({
-  device: deviceField,
   command: z.string().min(1).describe("Shell command, or executable path when shell=direct."),
   args: z.array(z.string()).optional().describe("Arguments for shell=direct only."),
-  cwd: z.string().optional().describe("Working directory. Defaults to the target DevRelay process directory."),
-  env: z.record(z.string(), z.string()).optional().describe("Environment variables merged over the target device environment."),
+  cwd: z.string().optional().describe("Working directory. Defaults to the DevRelay process directory."),
+  env: z.record(z.string(), z.string()).optional().describe("Environment variables merged over the current environment."),
   shell: shellSchema.optional().default("auto").describe("Execution mode. auto uses cmd.exe on Windows and $SHELL or /bin/sh elsewhere.")
 });
 
-export function createDevRelayServer(runtime: ClusterRuntime): McpServer {
+function toCommandSpec(input: z.infer<typeof commandSchema>): CommandSpec {
+  return {
+    command: input.command,
+    args: input.args,
+    cwd: input.cwd,
+    env: input.env,
+    shell: input.shell
+  };
+}
+
+function textResult(value: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
+}
+
+async function contentResult(value: unknown, images: string[] | undefined, baseDir: string) {
+  return { content: [
+    { type: "text" as const, text: JSON.stringify(value, null, 2) },
+    ...await loadImageContents(images, baseDir)
+  ] };
+}
+
+function errorResult(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ error: message }, null, 2) }], isError: true };
+}
+
+async function handled<T>(fn: () => Promise<T> | T) {
+  try {
+    return textResult(await fn());
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+function deviceView(identity: DeviceIdentity) {
+  return {
+    nodeId: identity.nodeId, name: identity.name, defaultName: identity.defaultName,
+    aliases: identity.aliases, platform: identity.facts.platform, arch: identity.facts.arch,
+    hardware: identity.facts.boardModel ?? identity.facts.cpuModel, online: true
+  };
+}
+
+export function createDevRelayServer(manager: ProcessManager, identity: DeviceIdentity): McpServer {
   const server = new McpServer({ name: "devrelay", version: "0.1.0" });
+
   server.registerTool(
     "exec",
     {
-      description: "Run a command to completion on a selected DevRelay device and return stdout/stderr metadata, with optional MCP image attachments.",
+      description: "Run a command to completion and return stdout/stderr metadata, with optional MCP image attachments.",
       _meta: oauthToolMeta,
       inputSchema: commandSchema.extend({
         stdin: z.string().optional().describe("Optional stdin content. stdin is closed after this content is sent."),
         timeoutMs: z.number().int().positive().max(86_400_000).optional().describe("Kill the command after this many milliseconds."),
         maxOutputChars: z.number().int().min(1024).max(4_000_000).optional().describe("Maximum retained stdout+stderr characters. Default 524288."),
-        images: z.array(z.string().min(1)).max(4).optional().describe("Image files to return after the command completes. Relative paths resolve from cwd on the target device.")
+        images: z.array(z.string().min(1)).max(4).optional().describe("Image files to return after the command completes. Relative paths resolve from cwd. PNG/JPEG/WebP/GIF only.")
       })
     },
-    async (input) => await runtime.invoke("exec", input) as any
+    async (input) => {
+      try {
+        const value = await manager.execute(toCommandSpec(input), {
+          stdin: input.stdin, timeoutMs: input.timeoutMs, maxOutputChars: input.maxOutputChars
+        });
+        return await contentResult({ device: deviceView(identity), ...value }, input.images, input.cwd ?? process.cwd());
+      } catch (error) { return errorResult(error); }
+    }
   );
 
   server.registerTool(
     "process_start",
     {
-      description: "Start a long-running managed process on a selected device. Set terminal=true for a PTY/ConPTY session; multiple sessions may coexist.",
+      description: "Start a long-running managed process. Set terminal=true for a PTY/ConPTY session; multiple sessions may coexist.",
       _meta: oauthToolMeta,
       inputSchema: commandSchema.extend({
         maxBufferChars: z.number().int().min(16_384).max(8_000_000).optional().describe("Rolling output buffer size. Default 1048576 characters."),
@@ -47,28 +94,39 @@ export function createDevRelayServer(runtime: ClusterRuntime): McpServer {
         rows: z.number().int().min(5).max(300).optional().default(30)
       })
     },
-    async (input) => await runtime.invoke("process_start", input) as any
+    async (input) => handled(async () => ({
+      device: deviceView(identity),
+      process: await manager.start(toCommandSpec(input), input.maxBufferChars, {
+        terminal: input.terminal, columns: input.columns, rows: input.rows
+      })
+    }))
   );
+
   server.registerTool(
     "process_read",
     {
-      description: "Read retained output from a managed process. The process ID identifies its owning device, so cross-device reads are routed automatically.",
+      description: "Read retained process/terminal output incrementally and optionally attach image files. Reuse nextCursor for only new output.",
       _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
         cursor: z.number().int().nonnegative().optional().default(0),
         maxChars: z.number().int().min(1).max(1_000_000).optional().default(65_536),
         waitMs: z.number().int().min(0).max(30_000).optional().default(0).describe("Wait for new output or process exit when no data is currently available."),
-        images: z.array(z.string().min(1)).max(4).optional().describe("Image files to return with this read from the process-owning device.")
+        images: z.array(z.string().min(1)).max(4).optional().describe("Image files to return with this read. Relative paths resolve from the managed process cwd.")
       })
     },
-    async (input) => await runtime.invoke("process_read", input) as any
+    async ({ processId, cursor, maxChars, waitMs, images }) => {
+      try {
+        const value = await manager.read(processId, { cursor, maxChars, waitMs });
+        return await contentResult({ device: deviceView(identity), ...value }, images, value.process.cwd ?? process.cwd());
+      } catch (error) { return errorResult(error); }
+    }
   );
 
   server.registerTool(
     "process_write",
     {
-      description: "Write data to a managed pipe or PTY session. The owning device is inferred from processId. PTY sessions can also be resized.",
+      description: "Write data to a managed pipe or PTY session. PTY sessions can also be resized with columns and rows.",
       _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
@@ -78,31 +136,34 @@ export function createDevRelayServer(runtime: ClusterRuntime): McpServer {
         rows: z.number().int().min(5).max(300).optional().describe("Resize a terminal session to this many rows. Supply columns too.")
       })
     },
-    async (input) => await runtime.invoke("process_write", input) as any
+    async ({ processId, data, end, columns, rows }) => handled(() => {
+      if ((columns === undefined) !== (rows === undefined)) throw new Error("columns and rows must be supplied together.");
+      const resize = columns !== undefined && rows !== undefined ? { columns, rows } : undefined;
+      return Promise.resolve(manager.write(processId, data, end, resize)).then((value) => ({ device: deviceView(identity), ...value }));
+    })
   );
+
   server.registerTool(
     "process_stop",
     {
-      description: "Stop a managed process tree and remove it from the registry. The owning device is inferred from processId.",
+      description: "Stop a managed process tree and remove it from the registry.",
       _meta: oauthToolMeta,
       inputSchema: z.object({
         processId: z.string().min(1),
         force: z.boolean().optional().default(true)
       })
     },
-    async (input) => await runtime.invoke("process_stop", input) as any
+    async ({ processId, force }) => handled(async () => ({ device: deviceView(identity), process: await manager.stop(processId, force) }))
   );
 
   server.registerTool(
     "process_list",
     {
-      description: "List the DevRelay cluster view: online/offline devices plus retained managed processes. Optionally limit processes to one device.",
+      description: "List processes started by DevRelay. Completed processes remain visible briefly so their output can still be read.",
       _meta: oauthToolMeta,
-      inputSchema: z.object({
-        device: deviceField
-      })
+      inputSchema: z.object({})
     },
-    async (input) => await runtime.invoke("process_list", input) as any
+    async () => textResult({ device: deviceView(identity), processes: manager.list() })
   );
 
   return server;

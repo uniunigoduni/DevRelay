@@ -12,9 +12,6 @@ MCP client
 DevRelay MCP adapter
    |
    v
-ClusterRuntime ---- authenticated peer API ---- other DevRelay nodes
-   |
-   v
 ProcessManager
    |
    +-- one-shot pipe child (`exec`)
@@ -56,8 +53,8 @@ Every event receives a monotonically increasing cursor. `process_read` accepts t
 
 MCP protocol handling belongs to the official SDK. DevRelay uses stdio or Streamable HTTP independently of ProcessManager. Neither transport contains Git, filesystem, Docker, browser, or language-specific logic.
 
-## Device identity and peer routing
+## Device identity and multi-device model
 
-`DeviceIdentity` separates a permanent `nodeId` from mutable human-facing names. `ClusterRuntime` owns target resolution, peer status, HMAC-authenticated forwarding, node-prefixed managed-process IDs, and cluster-aware OAuth routing. Process execution itself remains in `ProcessManager`.
+Each DevRelay owns one local `DeviceIdentity`, persisted under `.devrelay/device.json`. The immutable `nodeId` is separate from the editable display name; `defaultName` is recomputed from OS/hardware facts and aliases are optional. Tool results expose this local identity with `online: true` while the endpoint is responding.
 
-The current peer topology is static and direct rather than gossip-based. This keeps the runtime small and makes failure behavior explicit; see [cluster.md](cluster.md).
+DevRelay has no built-in device federation. Multiple machines are represented by multiple independently registered MCP plugins/connectors. Process IDs remain local to the DevRelay instance that created them, and there is no peer listener, cluster secret, discovery protocol, or cross-device forwarding.

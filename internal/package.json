@@ -12,14 +12,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-force-exit dist/test/*.test.js",
     "start": "node dist/src/main.js",
     "start:http": "node dist/src/main.js --http",
     "launch": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\DevRelay-Launcher.ps1",
     "gui:https": "node gui/devrelay-gui.mjs --mode=https",
-    "gui:chatgpt": "node gui/devrelay-gui.mjs --mode=chatgpt"
+    "gui:chatgpt": "node gui/devrelay-gui.mjs --mode=chatgpt",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",

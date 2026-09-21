@@ -4,12 +4,8 @@ const pluginLog = $("#pluginLog");
 const deviceNameInput = $("#deviceNameInput");
 const deviceAliasesInput = $("#deviceAliasesInput");
 const deviceDefaultName = $("#deviceDefaultName");
+const deviceStatus = $("#deviceStatus");
 const deviceNodeId = $("#deviceNodeId");
-const clusterEnabledInput = $("#clusterEnabledInput");
-const clusterPortInput = $("#clusterPortInput");
-const clusterPeersInput = $("#clusterPeersInput");
-const clusterKeyInput = $("#clusterKeyInput");
-const copyClusterKey = $("#copyClusterKey");
 const themeSelect = $("#themeSelect");
 const modeSelect = $("#modeSelect");
 const portInput = $("#portInput");
@@ -22,7 +18,6 @@ const oauthApproval = $("#oauthApproval");
 const oauthClientName = $("#oauthClientName");
 const oauthRedirectHost = $("#oauthRedirectHost");
 const oauthScopes = $("#oauthScopes");
-const oauthDeviceName = $("#oauthDeviceName");
 const approveOAuth = $("#approveOAuth");
 const denyOAuth = $("#denyOAuth");
 
@@ -89,11 +84,8 @@ function render(state) {
     deviceNameInput.value = state.device?.name || "";
     deviceAliasesInput.value = (state.device?.aliases || []).join(", ");
     deviceDefaultName.textContent = state.device?.defaultName || "Initializing...";
-    deviceNodeId.textContent = state.device?.nodeId || "Initializing...";
-    clusterEnabledInput.checked = state.cluster?.enabled !== false;
-    clusterPortInput.value = state.cluster?.listenPort ?? 7319;
-    clusterPeersInput.value = (state.cluster?.peers || []).join("\n");
-    clusterKeyInput.value = state.cluster?.key || "";
+    deviceStatus.textContent = state.device?.online ? "Online" : "Offline";
+    deviceNodeId.textContent = state.device?.nodeId || "-";
     themeSelect.value = state.theme === "black-soft" ? "black-soft" : "white-soft";
     modeSelect.value = state.mode;
     portInput.value = state.port;
@@ -103,11 +95,6 @@ function render(state) {
   const deviceLocked = active || transition || !state.device;
   deviceNameInput.disabled = deviceLocked || requestBusy;
   deviceAliasesInput.disabled = deviceLocked || requestBusy;
-  clusterEnabledInput.disabled = active || transition || requestBusy;
-  clusterPortInput.disabled = active || transition || requestBusy;
-  clusterPeersInput.disabled = active || transition || requestBusy;
-  clusterKeyInput.disabled = active || transition || requestBusy;
-  copyClusterKey.disabled = !lastState?.cluster?.key || requestBusy;
   themeSelect.disabled = requestBusy;
   modeSelect.disabled = active || transition;
   portInput.disabled = active || transition;
@@ -120,7 +107,6 @@ function render(state) {
     oauthClientName.textContent = pendingOAuth.clientName || "OAuth client";
     oauthRedirectHost.textContent = pendingOAuth.redirectHost || "unknown";
     oauthScopes.textContent = (pendingOAuth.scopes || []).join(" ");
-    oauthDeviceName.textContent = pendingOAuth.device?.name || state.device?.name || "local";
     approveOAuth.disabled = requestBusy;
     denyOAuth.disabled = requestBusy;
     if (pendingOAuth.id !== lastOAuthPendingId) setSettingsOpen(true);
@@ -166,24 +152,12 @@ async function decideOAuth(approve) {
 }
 approveOAuth.addEventListener("click", () => { void decideOAuth(true); });
 denyOAuth.addEventListener("click", () => { void decideOAuth(false); });
-copyClusterKey.addEventListener("click", async () => {
-  const key = lastState?.cluster?.key || clusterKeyInput.value.trim();
-  if (!key) return;
-  try {
-    await navigator.clipboard.writeText(key);
-    settingsMessage.classList.remove("error");
-    settingsMessage.textContent = "Cluster key copied";
-  } catch {
-    settingsMessage.textContent = "Could not copy cluster key";
-    settingsMessage.classList.add("error");
-  }
-});
 
 themeSelect.addEventListener("change", () => {
   settingsDirty = true;
   document.documentElement.dataset.theme = themeSelect.value;
 });
-[deviceNameInput, deviceAliasesInput, clusterEnabledInput, clusterPortInput, clusterPeersInput, clusterKeyInput, modeSelect, portInput, autoStartInput].forEach((element) => {
+[deviceNameInput, deviceAliasesInput, modeSelect, portInput, autoStartInput].forEach((element) => {
   element.addEventListener("change", () => { settingsDirty = true; });
 });
 
@@ -198,10 +172,6 @@ saveSettings.addEventListener("click", async () => {
       body: JSON.stringify({
         deviceName: deviceNameInput.value.trim(),
         deviceAliases: deviceAliasesInput.value.split(",").map((value) => value.trim()).filter(Boolean),
-        clusterEnabled: clusterEnabledInput.checked,
-        clusterPort: Number(clusterPortInput.value),
-        clusterPeers: clusterPeersInput.value.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean),
-        clusterKey: clusterKeyInput.value.trim(),
         theme: themeSelect.value,
         mode: modeSelect.value,
         port: Number(portInput.value),
