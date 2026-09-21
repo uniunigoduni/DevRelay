@@ -13,6 +13,7 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 - MCP over stdio.
 - MCP over Streamable HTTP.
 - OAuth 2.1 Authorization Code + PKCE with DCR for the public HTTPS Named Tunnel launcher.
+- Optional peer-to-peer multi-device routing with permanent node IDs and human-friendly device names.
 - Arbitrary one-shot command execution.
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
@@ -85,9 +86,9 @@ The normal remote-access pattern is to keep DevRelay bound to loopback and place
 | `process_read` | Read process output incrementally and optionally return images. |
 | `process_write` | Send input; PTY sessions can also be resized. |
 | `process_stop` | Stop a managed process tree and forget it. |
-| `process_list` | List processes currently retained by DevRelay. |
+| `process_list` | List the cluster device view plus retained processes. |
 
-There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`.
+`exec` and `process_start` accept an optional `device` selector. Managed process IDs carry their owning node, so later read/write/stop calls route automatically. There are intentionally no Git, filesystem, Docker, package-manager, or search-specific tools. Use their CLIs through `exec` or `process_start`.
 
 ## Shell modes
 
@@ -124,6 +125,7 @@ Completed managed processes remain in memory for 10 minutes so their final outpu
 
 - [Architecture](internal/docs/architecture.md)
 - [Tool reference](internal/docs/tools.md)
+- [Device identity and peer cluster](internal/docs/cluster.md)
 - [Transports and remote access](internal/docs/transports.md)
 - [Development guide](internal/docs/development.md)
 - [Security model](internal/docs/security.md)

@@ -6,7 +6,7 @@ A non-zero command exit code is a normal command result, not an MCP transport er
 
 ## `exec`
 
-Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`, `shell`, `stdin`, `timeoutMs`, `maxOutputChars`, and `images`.
+Runs a command until it exits. Inputs: optional `device`, `command`, optional `args`, `cwd`, `env`, `shell`, `stdin`, `timeoutMs`, `maxOutputChars`, and `images`. `device` may be a configured name, generated default name, alias, node ID, or unique node-ID prefix.
 
 `args` is valid only with `shell: "direct"`. The result contains `ok`, `exitCode`, `signal`, `timedOut`, `stdout`, `stderr`, `truncated`, `startedAt`, and `endedAt`.
 
@@ -14,7 +14,7 @@ Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`,
 
 ## `process_start`
 
-Starts a command without waiting for completion. It accepts the common command fields plus `maxBufferChars`.
+Starts a command without waiting for completion. It accepts the common command fields, including optional `device`, plus `maxBufferChars`. Returned process IDs include the owning node ID.
 
 Set `terminal: true` to allocate a PTY/ConPTY for interactive terminal applications. `columns` and `rows` default to 120×30. Multiple terminal and non-terminal sessions can coexist because every start returns an independent DevRelay process ID.
 
@@ -22,7 +22,7 @@ The process snapshot reports `terminal`, `columns`, and `rows` in addition to th
 
 ## `process_read`
 
-Inputs are `processId`, `cursor`, `maxChars`, `waitMs`, and optional `images`. Start with cursor `0`; reuse `nextCursor` on the next call. `waitMs` can wait up to 30 seconds for output or exit.
+Inputs are `processId`, `cursor`, `maxChars`, `waitMs`, and optional `images`. The owning device is inferred from `processId` and remote reads are forwarded automatically. Start with cursor `0`; reuse `nextCursor` on the next call. `waitMs` can wait up to 30 seconds for output or exit.
 
 Output is an ordered `events` array. Pipe sessions report `stdout` and `stderr` separately. PTY sessions expose the terminal byte stream as `stdout`, including normal ANSI terminal control sequences.
 
@@ -40,7 +40,7 @@ Stops a managed process and removes the session from the registry. `force` defau
 
 ## `process_list`
 
-Returns all sessions retained by the ProcessManager, including recently completed sessions whose output is still available.
+Returns the cluster view (`currentDevice`, known online/offline `devices`) plus retained managed processes. Optional `device` limits the process list to one resolved node.
 
 ## Common command fields
 

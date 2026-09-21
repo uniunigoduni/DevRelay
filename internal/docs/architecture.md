@@ -12,6 +12,9 @@ MCP client
 DevRelay MCP adapter
    |
    v
+ClusterRuntime ---- authenticated peer API ---- other DevRelay nodes
+   |
+   v
 ProcessManager
    |
    +-- one-shot pipe child (`exec`)
@@ -52,3 +55,9 @@ Every event receives a monotonically increasing cursor. `process_read` accepts t
 ## Transport separation
 
 MCP protocol handling belongs to the official SDK. DevRelay uses stdio or Streamable HTTP independently of ProcessManager. Neither transport contains Git, filesystem, Docker, browser, or language-specific logic.
+
+## Device identity and peer routing
+
+`DeviceIdentity` separates a permanent `nodeId` from mutable human-facing names. `ClusterRuntime` owns target resolution, peer status, HMAC-authenticated forwarding, node-prefixed managed-process IDs, and cluster-aware OAuth routing. Process execution itself remains in `ProcessManager`.
+
+The current peer topology is static and direct rather than gossip-based. This keeps the runtime small and makes failure behavior explicit; see [cluster.md](cluster.md).

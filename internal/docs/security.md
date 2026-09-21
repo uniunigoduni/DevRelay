@@ -41,3 +41,9 @@ The Cloudflare Named Tunnel provides TLS and a stable public URL. DevRelay adds 
 The Windows launcher never writes `CONTROL_PLANE_API_KEY` as plaintext project configuration. If the key is not already supplied through the environment, the launcher reads it as a `SecureString` and stores the encrypted representation under `.devrelay/` using Windows DPAPI. That encrypted value is tied to the Windows user context and is decrypted only when starting or validating `tunnel-client`.
 
 The Tunnel ID is not treated as a secret and is stored in `.devrelay/launcher.json`. Both launcher state and the downloaded tunnel-client bundle are excluded from Git.
+
+## Peer-cluster security
+
+Peer routing is disabled by default. When enabled, it uses a shared 32-byte cluster key and HMAC-SHA256 request authentication with timestamp and nonce replay checks. The key lives in `.devrelay/cluster.key`, is excluded from Git, and must be copied only to trusted DevRelay nodes. Changing the key requires stopping the affected nodes.
+
+Port 7319 is not a public management API. Keep it on a trusted LAN or private overlay network even though requests are authenticated. A peer authenticated with the cluster key has the same practical command-execution authority as the public MCP client.

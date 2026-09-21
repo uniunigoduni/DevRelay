@@ -2,7 +2,7 @@ import http from "node:http";
 import { spawn, execFile } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +11,9 @@ const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const settingsPath = path.join(stateDir, "gui-settings.json");
+const devicePath = path.join(stateDir, "device.json");
+const peersPath = path.join(stateDir, "peers.json");
+const clusterKeyPath = path.join(stateDir, "cluster.key");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
 const guiPort = 7318;
 const hostDir = path.join(guiDir, "host");
@@ -86,6 +89,8 @@ let autoStartPending = settings.autoStart;
 let publicUrl = await resolvePublicUrl(settings.mode);
 let oauthControlSecret = null;
 let oauthPending = [];
+let deviceInfo = await readDeviceInfo();
+let clusterInfo = await readClusterInfo();
 const state = {
   running: false,
   starting: false,
@@ -106,6 +111,33 @@ function pushLog(target, message, level = "info") {
   if (target.length > MAX_LOG_LINES) target.splice(0, target.length - MAX_LOG_LINES);
   const logPath = target === aiLogs ? commandLogPath : target === pluginLogs ? serverLogPath : null;
   if (logPath) appendFileSync(logPath, `${at} [${String(level).toUpperCase()}] ${text.replace(/\r?\n/g, "\\n")}\n`, "utf8");
+}
+
+async function readDeviceInfo() {
+  try {
+    const value = JSON.parse(await readFile(devicePath, "utf8"));
+    return value && typeof value === "object" ? value : null;
+  } catch { return null; }
+}
+
+async function readClusterInfo() {
+  let config = { enabled: false, listenHost: "0.0.0.0", listenPort: 7319, peers: [] };
+  try {
+    const parsed = JSON.parse(await readFile(peersPath, "utf8"));
+    config = {
+      enabled: typeof parsed.enabled === "boolean" ? parsed.enabled : false,
+      listenHost: typeof parsed.listenHost === "string" ? parsed.listenHost : "0.0.0.0",
+      listenPort: Number.isInteger(parsed.listenPort) ? parsed.listenPort : 7319,
+      peers: Array.isArray(parsed.peers) ? parsed.peers.filter((v) => typeof v === "string") : []
+    };
+  } catch {}
+  let key = "";
+  try { key = (await readFile(clusterKeyPath, "utf8")).trim(); } catch {}
+  if (!key) {
+    key = randomBytes(32).toString("base64url");
+    await writeFile(clusterKeyPath, `${key}\n`, { encoding: "utf8", mode: 0o600 });
+  }
+  return { ...config, key };
 }
 
 async function loadSettings() {
@@ -146,6 +178,8 @@ function snapshot() {
     sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
+    device: deviceInfo,
+    cluster: clusterInfo,
     oauthPending,
     aiLogs,
     pluginLogs
@@ -220,7 +254,7 @@ async function startRuntime() {
     cwd: internalRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
+    env: { ...process.env, DEVRELAY_STATE_DIR: stateDir, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
   });
 
   runtime.stdout.setEncoding("utf8");
@@ -298,6 +332,9 @@ async function pollOAuthPending() {
   } catch {}
 }
 setInterval(() => { void pollOAuthPending(); }, 500).unref();
+setInterval(() => {
+  void readDeviceInfo().then((value) => { deviceInfo = value; }).catch(() => {});
+}, 500).unref();
 
 function sendJson(res, status, value) {
   const body = JSON.stringify(value);
@@ -365,9 +402,38 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === guiPort) {
         return sendJson(res, 400, { error: "Port must be an integer from 1024 to 65535." });
       }
+      const deviceName = typeof next.deviceName === "string" ? next.deviceName.trim() : deviceInfo?.name;
+      const deviceAliases = Array.isArray(next.deviceAliases)
+        ? [...new Set(next.deviceAliases.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean))].slice(0, 16)
+        : (deviceInfo?.aliases ?? []);
+      const clusterEnabled = next.clusterEnabled !== false;
+      const clusterPort = Number(next.clusterPort ?? clusterInfo.listenPort);
+      if (!Number.isInteger(clusterPort) || clusterPort < 1 || clusterPort > 65535 || clusterPort === port || clusterPort === guiPort)
+        return sendJson(res, 400, { error: "Peer port must be a different valid TCP port." });
+      const clusterKey = typeof next.clusterKey === "string" ? next.clusterKey.trim() : clusterInfo.key;
+      if (!/^[A-Za-z0-9_-]{43}$/.test(clusterKey) || Buffer.from(clusterKey, "base64url").length !== 32)
+        return sendJson(res, 400, { error: "Cluster key must be a 32-byte base64url key." });
+      const clusterPeers = [];
+      for (const raw of Array.isArray(next.clusterPeers) ? next.clusterPeers : clusterInfo.peers) {
+        if (typeof raw !== "string" || !raw.trim()) continue;
+        try { const u = new URL(raw.trim()); if (!["http:", "https:"].includes(u.protocol)) throw new Error(); clusterPeers.push(u.origin); }
+        catch { return sendJson(res, 400, { error: `Invalid peer URL: ${raw}` }); }
+      }
       const runtimeSettingChanged = mode !== settings.mode || port !== settings.port || autoStart !== settings.autoStart;
-      if ((runtime || state.starting || state.running) && runtimeSettingChanged) {
-        return sendJson(res, 409, { error: "Stop DevRelay before changing runtime settings." });
+      const deviceChanged = deviceInfo && (deviceName !== deviceInfo.name || JSON.stringify(deviceAliases) !== JSON.stringify(deviceInfo.aliases ?? []));
+      const clusterChanged = clusterEnabled !== clusterInfo.enabled || clusterPort !== clusterInfo.listenPort || clusterKey !== clusterInfo.key || JSON.stringify(clusterPeers) !== JSON.stringify(clusterInfo.peers);
+      if ((runtime || state.starting || state.running) && (runtimeSettingChanged || deviceChanged || clusterChanged)) {
+        return sendJson(res, 409, { error: "Stop DevRelay before changing runtime, device, or cluster settings." });
+      }
+      if (deviceInfo && deviceChanged) {
+        if (!deviceName) return sendJson(res, 400, { error: "Device name cannot be empty." });
+        deviceInfo = { ...deviceInfo, name: deviceName, aliases: deviceAliases, updatedAt: new Date().toISOString() };
+        await writeFile(devicePath, `${JSON.stringify(deviceInfo, null, 2)}\n`, "utf8");
+      }
+      if (clusterChanged) {
+        clusterInfo = { enabled: clusterEnabled, listenHost: clusterInfo.listenHost || "0.0.0.0", listenPort: clusterPort, peers: [...new Set(clusterPeers)], key: clusterKey };
+        await writeFile(peersPath, `${JSON.stringify({ enabled: clusterInfo.enabled, listenHost: clusterInfo.listenHost, listenPort: clusterInfo.listenPort, peers: clusterInfo.peers }, null, 2)}\n`, "utf8");
+        await writeFile(clusterKeyPath, `${clusterInfo.key}\n`, { encoding: "utf8", mode: 0o600 });
       }
       settings = { mode, port, autoStart, theme };
       publicUrl = await resolvePublicUrl(settings.mode);

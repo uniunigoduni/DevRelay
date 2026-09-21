@@ -23,6 +23,11 @@ All notable changes to DevRelay are documented here.
 - Added terminal resizing through `process_write` and terminal state in process snapshots.
 - Added PNG/JPEG/WebP/GIF result attachments through `exec.images` and `process_read.images`.
 - Added `node-pty` as the single native dependency required for real terminal sessions.
+- Added permanent device identities with hardware-derived default names, editable names, and aliases.
+- Added HMAC-authenticated peer-to-peer routing while preserving the six-tool MCP surface.
+- Added cluster device presence through `process_list`, node-owned process IDs, and automatic cross-node process routing.
+- Added cluster-aware OAuth routing and approval so requests may land on different DevRelay connectors.
+- Added GUI settings for device identity, peer URLs/port, and the shared cluster key.
 
 ### Changed
 

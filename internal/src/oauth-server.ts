@@ -64,6 +64,8 @@ export interface OAuthServerOptions {
   resource: string;
   stateDir: string;
   controlSecret: string;
+  nodeId?: string;
+  signingKey?: Uint8Array;
 }
 
 function base64url(value: Buffer | string): string {
@@ -164,6 +166,8 @@ export class DevRelayOAuthServer {
   readonly resource: string;
   readonly metadataUrl: string;
   private readonly controlSecret: string;
+  private readonly nodeId: string;
+  private readonly providedSigningKey?: Uint8Array;
   private readonly oauthDir: string;
   private readonly clientsPath: string;
   private readonly refreshPath: string;
@@ -178,6 +182,8 @@ export class DevRelayOAuthServer {
     this.issuer = options.issuer.replace(/\/$/, "");
     this.resource = options.resource;
     this.controlSecret = options.controlSecret;
+    this.nodeId = options.nodeId ?? "local";
+    this.providedSigningKey = options.signingKey;
     this.oauthDir = path.join(options.stateDir, "oauth");
     this.clientsPath = path.join(this.oauthDir, "clients.json");
     this.refreshPath = path.join(this.oauthDir, "refresh-tokens.json");
@@ -199,6 +205,7 @@ export class DevRelayOAuthServer {
   }
 
   private async loadOrCreateSigningKey(): Promise<Buffer> {
+    if (this.providedSigningKey?.length) return Buffer.from(this.providedSigningKey);
     try {
       const existing = (await readFile(this.signingKeyPath, "utf8")).trim();
       if (existing) return Buffer.from(existing, "base64url");
@@ -321,7 +328,7 @@ export class DevRelayOAuthServer {
       const now = nowSeconds();
       if (!Number.isFinite(payload.exp) || payload.exp <= now || (payload.nbf && payload.nbf > now + 5)) return null;
       if (typeof payload.scope !== "string" || !payload.scope.split(/\s+/).includes(REQUIRED_SCOPE)) return null;
-      if (typeof payload.client_id !== "string" || !this.clients.has(payload.client_id)) return null;
+      if (typeof payload.client_id !== "string" || !payload.client_id) return null;
       return { clientId: payload.client_id, scope: payload.scope };
     } catch { return null; }
   }
@@ -349,7 +356,7 @@ export class DevRelayOAuthServer {
     return this.clients.get(clientId) ?? null;
   }
 
-  private verifyControlSecret(request: IncomingMessage): boolean {
+  verifyControlRequest(request: IncomingMessage): boolean {
     const provided = request.headers["x-devrelay-control-secret"];
     return typeof provided === "string" && safeEqualText(provided, this.controlSecret);
   }
@@ -416,7 +423,7 @@ export class DevRelayOAuthServer {
         oauthError(response, 400, "invalid_client_metadata", "authorization_code and response_type code are required.");
         return;
       }
-      const clientId = randomToken("drc_", 24);
+      const clientId = `drc.${this.nodeId}.${randomBytes(24).toString("base64url")}`;
       const client: OAuthClient = {
         clientId,
         redirectUris,
@@ -480,7 +487,7 @@ export class DevRelayOAuthServer {
     catch (error) {
       return this.authorizationError(response, client, redirectUri, state, "invalid_scope", error instanceof Error ? error.message : "Invalid scope.");
     }
-    const id = randomToken("par_", 24);
+    const id = `par.${this.nodeId}.${randomBytes(24).toString("base64url")}`;
     const createdAt = Date.now();
     const pending: PendingAuthorization = {
       id,
@@ -527,7 +534,7 @@ h1{font-size:18px;margin:0 0 18px}p{font-size:13px;line-height:1.7;margin:10px 0
   }
 
   private async handleInternal(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
-    if (!this.verifyControlSecret(request)) {
+    if (!this.verifyControlRequest(request)) {
       response.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
       response.end("Forbidden\n");
       return;
@@ -550,7 +557,7 @@ h1{font-size:18px;margin:0 0 18px}p{font-size:13px;line-height:1.7;margin:10px 0
     }
     response.writeHead(404).end();
   }
-  private decidePending(id: string, approve: boolean): boolean {
+  decidePending(id: string, approve: boolean): boolean {
     this.cleanupEphemeral();
     const request = this.pending.get(id);
     if (!request || request.status !== "pending") return false;
