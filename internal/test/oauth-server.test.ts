@@ -71,6 +71,9 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     const authorizeResponse = await fetch(authorize);
     assert.equal(authorizeResponse.status, 200);
     assert.match(await authorizeResponse.text(), /Waiting for local approval/);
+    const duplicateAuthorizeResponse = await fetch(authorize);
+    assert.equal(duplicateAuthorizeResponse.status, 200);
+    assert.match(await duplicateAuthorizeResponse.text(), /wait=25000/);
 
     const pendingResponse = await fetch(`${base}/oauth/internal/pending`, {
       headers: { "x-devrelay-control-secret": "local-control-secret" }
@@ -78,6 +81,10 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     const pending = await pendingResponse.json() as { pending: Array<{ id: string }> };
     assert.equal(pending.pending.length, 1);
 
+    const waitStarted = Date.now();
+    const waitingStatus = fetch(`${base}/oauth/authorize/status?id=${encodeURIComponent(pending.pending[0]!.id)}&wait=5000`)
+      .then((response) => response.json()) as Promise<{ status: string; redirect: string }>;
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const decision = await fetch(`${base}/oauth/internal/decision`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-devrelay-control-secret": "local-control-secret" },
@@ -85,8 +92,9 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     });
     assert.equal(decision.status, 200);
 
-    const status = await fetch(`${base}/oauth/authorize/status?id=${encodeURIComponent(pending.pending[0]!.id)}`)
-      .then((response) => response.json()) as { redirect: string };
+    const status = await waitingStatus;
+    assert.equal(status.status, "approved");
+    assert.ok(Date.now() - waitStarted < 1500);
     const callback = new URL(status.redirect);
     assert.equal(callback.searchParams.get("state"), "state-123");
     const code = callback.searchParams.get("code");
@@ -136,5 +144,39 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     });
     assert.equal(replay.status, 400);
     assert.equal((await replay.json() as { error: string }).error, "invalid_grant");
+  });
+});
+
+
+test("newer OAuth authorization supersedes an older pending request", async () => {
+  await withOAuthServer(async (base) => {
+    const registration = await fetch(`${base}/oauth/register`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [REDIRECT], token_endpoint_auth_method: "none", client_name: "ChatGPT test" })
+    }).then((response) => response.json()) as { client_id: string };
+    const authorize = async (state: string) => {
+      const verifier = randomBytes(48).toString("base64url");
+      const url = new URL(`${base}/oauth/authorize`);
+      url.searchParams.set("response_type", "code"); url.searchParams.set("client_id", registration.client_id);
+      url.searchParams.set("redirect_uri", REDIRECT); url.searchParams.set("scope", "devrelay offline_access");
+      url.searchParams.set("state", state); url.searchParams.set("resource", RESOURCE);
+      url.searchParams.set("code_challenge", challenge(verifier)); url.searchParams.set("code_challenge_method", "S256");
+      assert.equal((await fetch(url)).status, 200);
+    };
+    await authorize("older");
+    const pendingUrl = `${base}/oauth/internal/pending`;
+    const headers = { "x-devrelay-control-secret": "local-control-secret" };
+    const older = await fetch(pendingUrl, { headers }).then((response) => response.json()) as { pending: Array<{ id: string }> };
+    assert.equal(older.pending.length, 1);
+    const olderId = older.pending[0]!.id;
+    await authorize("newer");
+    const newer = await fetch(pendingUrl, { headers }).then((response) => response.json()) as { pending: Array<{ id: string }> };
+    assert.equal(newer.pending.length, 1);
+    assert.notEqual(newer.pending[0]!.id, olderId);
+    const oldStatus = await fetch(`${base}/oauth/authorize/status?id=${encodeURIComponent(olderId)}`).then((response) => response.json()) as { status: string; redirect: string };
+    assert.equal(oldStatus.status, "denied");
+    const oldRedirect = new URL(oldStatus.redirect);
+    assert.equal(oldRedirect.searchParams.get("state"), "older");
+    assert.match(oldRedirect.searchParams.get("error_description") ?? "", /superseded/i);
   });
 });

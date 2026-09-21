@@ -358,7 +358,7 @@ export class DevRelayOAuthServer {
     this.cleanupEphemeral();
     return [...this.pending.values()]
       .filter((request) => request.status === "pending")
-      .sort((a, b) => a.createdAt - b.createdAt)
+      .sort((a, b) => b.createdAt - a.createdAt)
       .map((request) => ({
         id: request.id,
         clientName: request.clientName,
@@ -385,7 +385,7 @@ export class DevRelayOAuthServer {
       return true;
     }
     if (request.method === "GET" && url.pathname === "/oauth/authorize/status") {
-      this.handleAuthorizeStatus(response, url);
+      await this.handleAuthorizeStatus(response, url);
       return true;
     }
     if (request.method === "POST" && url.pathname === "/oauth/token") {
@@ -480,6 +480,23 @@ export class DevRelayOAuthServer {
     catch (error) {
       return this.authorizationError(response, client, redirectUri, state, "invalid_scope", error instanceof Error ? error.message : "Invalid scope.");
     }
+    for (const existing of this.pending.values()) {
+      if (existing.expiresAt > Date.now() && existing.clientId === client.clientId &&
+          existing.redirectUri === redirectUri && existing.codeChallenge === challenge &&
+          existing.resource === resource && existing.scope === scope && existing.state === (state ?? undefined)) {
+        html(response, 200, this.authorizationPage(existing));
+        return;
+      }
+    }
+    for (const existing of this.pending.values()) {
+      if (existing.status !== "pending" || existing.clientId !== client.clientId || existing.redirectUri !== redirectUri) continue;
+      const oldTarget = new URL(existing.redirectUri);
+      oldTarget.searchParams.set("error", "access_denied");
+      oldTarget.searchParams.set("error_description", "This authorization request was superseded by a newer request.");
+      if (existing.state) oldTarget.searchParams.set("state", existing.state);
+      existing.status = "denied";
+      existing.redirect = oldTarget.toString();
+    }
     const id = randomToken("par_", 24);
     const createdAt = Date.now();
     const pending: PendingAuthorization = {
@@ -512,13 +529,21 @@ h1{font-size:18px;margin:0 0 18px}p{font-size:13px;line-height:1.7;margin:10px 0
 </style></head><body><main class="card"><h1>DevRelay OAuth</h1><p><strong>${client}</strong> is requesting access to DevRelay.</p>
 <div class="client"><div>Redirect: <code>${host}</code></div><div>Scope: <code>${escapeHtml(request.scope)}</code></div></div>
 <p>Approve or deny this request in the visible DevRelay window on this computer.</p><p id="status" class="muted">Waiting for local approval...</p>
-<script>const id=${requestId};const s=document.getElementById('status');async function poll(){try{const r=await fetch('/oauth/authorize/status?id='+encodeURIComponent(id),{cache:'no-store'});const v=await r.json();if(v.redirect){location.replace(v.redirect);return;}if(v.status==='expired'){s.textContent='This request expired. Start the connection again.';return;}}catch{}setTimeout(poll,800)}poll();</script>
+<script>const id=${requestId};const s=document.getElementById('status');const delay=(ms)=>new Promise(r=>setTimeout(r,ms));async function poll(){for(;;){try{const r=await fetch('/oauth/authorize/status?id='+encodeURIComponent(id)+'&wait=25000',{cache:'no-store'});const v=await r.json();if(v.redirect){s.textContent=v.status==='approved'?'Approved. Returning to ChatGPT...':'Authorization denied. Returning to ChatGPT...';location.replace(v.redirect);return;}if(v.status==='expired'){s.textContent='This request expired. Start the connection again.';return;}}catch{s.textContent='Connection interrupted. Retrying...';await delay(1000);}}}poll();</script>
 </main></body></html>`;
   }
-  private handleAuthorizeStatus(response: ServerResponse, url: URL): void {
+  private async handleAuthorizeStatus(response: ServerResponse, url: URL): Promise<void> {
     this.cleanupEphemeral();
     const id = url.searchParams.get("id") ?? "";
-    const request = this.pending.get(id);
+    const requestedWait = Number(url.searchParams.get("wait") ?? "0");
+    const waitMs = Number.isFinite(requestedWait) ? Math.max(0, Math.min(25_000, Math.trunc(requestedWait))) : 0;
+    const deadline = Date.now() + waitMs;
+    let request = this.pending.get(id);
+    while (request?.status === "pending" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+      this.cleanupEphemeral();
+      request = this.pending.get(id);
+    }
     if (!request) {
       json(response, 200, { status: "expired" });
       return;

@@ -158,11 +158,21 @@ async function decideOAuth(approve) {
   if (!pending || requestBusy) return;
   requestBusy = true;
   approveOAuth.disabled = true; denyOAuth.disabled = true;
+  const originalApproveText = approveOAuth.textContent;
+  const originalDenyText = denyOAuth.textContent;
+  if (approve) approveOAuth.textContent = "Approving...";
+  else denyOAuth.textContent = "Denying...";
+  settingsMessage.classList.remove("error");
+  settingsMessage.textContent = approve ? "Approving OAuth request..." : "Denying OAuth request...";
   try {
     await api("/api/oauth/decision", { method: "POST", body: JSON.stringify({ id: pending.id, approve }) });
+    settingsMessage.textContent = approve ? "Approved. Returning the browser to ChatGPT..." : "Denied.";
   } catch (error) {
     settingsMessage.textContent = error.message; settingsMessage.classList.add("error");
-  } finally { requestBusy = false; await refresh(); }
+  } finally {
+    approveOAuth.textContent = originalApproveText; denyOAuth.textContent = originalDenyText;
+    requestBusy = false; await refresh();
+  }
 }
 approveOAuth.addEventListener("click", () => { void decideOAuth(true); });
 denyOAuth.addEventListener("click", () => { void decideOAuth(false); });
