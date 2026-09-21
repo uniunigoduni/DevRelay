@@ -6,7 +6,7 @@ A non-zero command exit code is a normal command result, not an MCP transport er
 
 ## `exec`
 
-Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`, `shell`, `stdin`, `timeoutMs`, `maxOutputChars`, and `images`.
+Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`, `shell`, `outputEncoding`, `stdin`, `timeoutMs`, `maxOutputChars`, and `images`.
 
 `args` is valid only with `shell: "direct"`. The result contains `ok`, `exitCode`, `signal`, `timedOut`, `stdout`, `stderr`, `truncated`, `startedAt`, and `endedAt`.
 
@@ -23,6 +23,8 @@ The process snapshot reports `terminal`, `columns`, and `rows` in addition to th
 ## `process_read`
 
 Inputs are `processId`, `cursor`, `maxChars`, `waitMs`, and optional `images`. Start with cursor `0`; reuse `nextCursor` on the next call. `waitMs` can wait up to 30 seconds for output or exit.
+
+`maxChars` is a soft response target between output events, not a strict byte/character ceiling. DevRelay does not split a retained event merely to satisfy `maxChars`, so one event can make a read exceed the requested value; this preserves cursor semantics without dropping part of an event.
 
 Output is an ordered `events` array. Pipe sessions report `stdout` and `stderr` separately. PTY sessions expose the terminal byte stream as `stdout`, including normal ANSI terminal control sequences.
 
@@ -45,6 +47,10 @@ Returns `{ device, processes }`, where `device` describes this DevRelay instance
 ## Common command fields
 
 `cwd` changes the working directory. `env` overlays variables on the DevRelay process environment rather than replacing it. `shell` defaults to `auto`. In `direct` mode, `command` is the executable and `args` is passed without shell parsing.
+
+`outputEncoding` overrides non-PTY stdout/stderr decoding. Normally omit it: on Windows, non-PTY `cmd`/`auto` and Windows PowerShell are run through a small wrapper that normalizes their output to UTF-8, while `direct`, `pwsh`, and non-Windows shells default to UTF-8. Use an explicit encoding such as `cp932`, `cp437`, `cp850`, or `system` for a legacy executable whose output encoding is known. An explicit override disables the Windows shell normalizer for that invocation.
+
+A byte stream does not contain enough information to reliably infer arbitrary encodings. DevRelay therefore does not guess UTF-8 versus a legacy code page from content. If a command intentionally combines independently encoded producers into one pipe and cannot be normalized by the Windows shell wrapper, use `process_start(terminal: true)` so ConPTY provides a UTF-8 terminal stream.
 
 ## Examples
 

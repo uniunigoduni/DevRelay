@@ -12,7 +12,8 @@ const commandSchema = z.object({
   args: z.array(z.string()).optional().describe("Arguments for shell=direct only."),
   cwd: z.string().optional().describe("Working directory. Defaults to the DevRelay process directory."),
   env: z.record(z.string(), z.string()).optional().describe("Environment variables merged over the current environment."),
-  shell: shellSchema.optional().default("auto").describe("Execution mode. auto uses cmd.exe on Windows and $SHELL or /bin/sh elsewhere.")
+  shell: shellSchema.optional().default("auto").describe("Execution mode. auto uses cmd.exe on Windows and $SHELL or /bin/sh elsewhere."),
+  outputEncoding: z.string().min(1).max(64).optional().describe("Override stdout/stderr decoding, for example utf8, cp932, cp437, or system. Normally omit this; Windows cmd/PowerShell output is normalized automatically.")
 });
 
 function toCommandSpec(input: z.infer<typeof commandSchema>): CommandSpec {
@@ -21,7 +22,8 @@ function toCommandSpec(input: z.infer<typeof commandSchema>): CommandSpec {
     args: input.args,
     cwd: input.cwd,
     env: input.env,
-    shell: input.shell
+    shell: input.shell,
+    outputEncoding: input.outputEncoding
   };
 }
 

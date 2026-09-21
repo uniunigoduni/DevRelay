@@ -6,6 +6,7 @@ export interface CommandSpec {
   cwd?: string;
   env?: Record<string, string>;
   shell?: ShellMode;
+  outputEncoding?: string;
 }
 
 export interface OutputEvent {

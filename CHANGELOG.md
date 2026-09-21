@@ -26,6 +26,7 @@ All notable changes to DevRelay are documented here.
 
 ### Changed
 
+- Windows non-PTY `cmd`/`auto` and Windows PowerShell output is now normalized to UTF-8 instead of guessing encodings from byte content. Added explicit `outputEncoding` overrides backed by `iconv-lite` for known legacy/OEM code pages such as CP932, CP437, and CP850.
 - Multi-device operation now uses separate MCP/plugin registrations per device; the experimental peer cluster, cluster key, cross-device routing, and distributed OAuth forwarding were removed. Local device identity, editable naming, aliases, and online metadata remain.
 - Build now cleans `dist/` first so removed tests or modules cannot remain as stale generated files.
 - Windows launchers no longer keep a terminal window open during normal use.

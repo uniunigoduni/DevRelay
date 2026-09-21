@@ -20,7 +20,7 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 - Process-tree termination on Windows.
 - Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
 - The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. The Windows launcher UI is a separate local controller.
-- Four direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, and `node-pty` for PTY/ConPTY.
+- Five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY.
 
 ## Requirements
 
@@ -103,6 +103,8 @@ DevRelay does not federate or route between devices. Run one DevRelay per machin
 - `direct`: execute `command` directly and pass the optional `args` array without a shell.
 
 `direct` is the best choice when the executable and arguments are already known because it avoids another shell parser.
+
+On Windows, non-PTY `cmd`/`auto` and Windows PowerShell output is normalized to UTF-8 before DevRelay decodes it. For a legacy executable with a known code page, set `outputEncoding` explicitly (for example `cp932`, `cp437`, `cp850`, or `system`). If one process intentionally writes multiple encodings into the same pipe, use a PTY/ConPTY session instead of relying on pipe decoding.
 
 ## Terminal sessions
 

@@ -2,13 +2,17 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { OutputBuffer } from "./output-buffer.js";
+import { PipeTextDecoder, detectWindowsPipeEncoding, resolveOutputEncoding } from "./pipe-text-decoder.js";
 import { writeAudit } from "./audit-log.js";
 import type { CommandSpec, ProcessSnapshot, ShellMode } from "./types.js";
 
 const DEFAULT_PROCESS_BUFFER_CHARS = 1_048_576;
 const DEFAULT_EXEC_OUTPUT_CHARS = 524_288;
 const COMPLETED_RETENTION_MS = 10 * 60 * 1000;
+const WINDOWS_SHELL_NORMALIZER = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "Normalize-WindowsShell.ps1");
 
 interface SessionInternal extends ProcessSnapshot {
   child?: ChildProcessWithoutNullStreams;
@@ -23,6 +27,7 @@ interface Invocation {
   file: string;
   args: string[];
   shell: ShellMode;
+  outputEncoding: string;
 }
 
 export interface ExecuteOptions {
@@ -176,13 +181,13 @@ export class ProcessManager {
     retain: boolean,
     options: StartOptions = {}
   ): Promise<SessionInternal> {
-    const invocation = this.resolveInvocation(spec);
+    const terminal = options.terminal === true;
+    const invocation = this.resolveInvocation(spec, terminal);
     const buffer = new OutputBuffer(maxBufferChars);
     const activity = new EventEmitter();
     const startedAt = new Date().toISOString();
     let resolveExit!: () => void;
     const exitPromise = new Promise<void>((resolve) => { resolveExit = resolve; });
-    const terminal = options.terminal === true;
     const columns = terminal ? (options.columns ?? 120) : null;
     const rows = terminal ? (options.rows ?? 30) : null;
 
@@ -243,11 +248,18 @@ export class ProcessManager {
       pty.onData((text) => { buffer.push("stdout", text); activity.emit("activity"); });
       pty.onExit(({ exitCode }) => finalize(exitCode, null));
     } else if (child) {
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", (text: string) => { buffer.push("stdout", text); activity.emit("activity"); });
-      child.stderr.on("data", (text: string) => { buffer.push("stderr", text); activity.emit("activity"); });
-      child.once("exit", finalize);
+      const stdoutDecoder = new PipeTextDecoder(invocation.outputEncoding);
+      const stderrDecoder = new PipeTextDecoder(invocation.outputEncoding);
+      const pushDecoded = (stream: "stdout" | "stderr", text: string) => {
+        if (!text) return;
+        buffer.push(stream, text);
+        activity.emit("activity");
+      };
+      child.stdout.on("data", (chunk: Buffer) => pushDecoded("stdout", stdoutDecoder.push(chunk)));
+      child.stderr.on("data", (chunk: Buffer) => pushDecoded("stderr", stderrDecoder.push(chunk)));
+      child.stdout.on("end", () => pushDecoded("stdout", stdoutDecoder.end()));
+      child.stderr.on("end", () => pushDecoded("stderr", stderrDecoder.end()));
+      child.once("close", finalize);
       child.once("error", (error) => {
         buffer.push("stderr", `[DevRelay process error] ${error.message}\n`);
         finalize(child!.exitCode, child!.signalCode);
@@ -257,26 +269,35 @@ export class ProcessManager {
     return session;
   }
 
-  private resolveInvocation(spec: CommandSpec): Invocation {
+  private resolveInvocation(spec: CommandSpec, terminal = false): Invocation {
     const shell = spec.shell ?? "auto";
-    if (shell === "direct") return { file: spec.command, args: spec.args ?? [], shell };
+    const utf8 = () => resolveOutputEncoding(spec.outputEncoding, "utf8");
+    const system = () => spec.outputEncoding
+      ? resolveOutputEncoding(spec.outputEncoding, "utf8")
+      : detectWindowsPipeEncoding();
+    const commandBase64 = () => Buffer.from(spec.command, "utf8").toString("base64");
+    const normalizedWindowsShell = (mode: "cmd" | "powershell") => ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", WINDOWS_SHELL_NORMALIZER, "-Mode", mode, "-CommandBase64", commandBase64()];
+
+    if (shell === "direct") return { file: spec.command, args: spec.args ?? [], shell, outputEncoding: utf8() };
     if (spec.args?.length) throw new Error("args is supported only when shell is 'direct'.");
 
     if (shell === "powershell") {
-      return { file: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-Command", spec.command], shell };
+      if (process.platform === "win32" && !terminal && !spec.outputEncoding) {
+        return { file: "powershell.exe", args: normalizedWindowsShell("powershell"), shell, outputEncoding: "utf8" };
+      }
+      return { file: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-Command", spec.command], shell, outputEncoding: process.platform === "win32" ? system() : utf8() };
     }
-    if (shell === "pwsh") {
-      return { file: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-Command", spec.command], shell };
-    }
-    if (shell === "cmd") {
-      return { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c", spec.command], shell };
+    if (shell === "pwsh") return { file: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-Command", spec.command], shell, outputEncoding: utf8() };
+
+    const cmdShell = shell === "cmd" || (shell === "auto" && process.platform === "win32");
+    if (cmdShell) {
+      if (process.platform === "win32" && !terminal && !spec.outputEncoding) {
+        return { file: "powershell.exe", args: normalizedWindowsShell("cmd"), shell, outputEncoding: "utf8" };
+      }
+      return { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c", spec.command], shell, outputEncoding: process.platform === "win32" ? system() : utf8() };
     }
 
-    if (process.platform === "win32") {
-      return { file: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/s", "/c", spec.command], shell };
-    }
-
-    return { file: process.env.SHELL ?? "/bin/sh", args: ["-lc", spec.command], shell };
+    return { file: process.env.SHELL ?? "/bin/sh", args: ["-lc", spec.command], shell, outputEncoding: utf8() };
   }
 
   private async killTree(pid: number, force: boolean): Promise<void> {
