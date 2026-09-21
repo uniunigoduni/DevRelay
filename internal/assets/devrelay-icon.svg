@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#01030A"/>
+      <stop offset="24%" stop-color="#040913"/>
+      <stop offset="48%" stop-color="#0A1423"/>
+      <stop offset="68%" stop-color="#12345A"/>
+      <stop offset="84%" stop-color="#2A78A8"/>
+      <stop offset="94%" stop-color="#82CFF0"/>
+      <stop offset="100%" stop-color="#F2FDFF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+
+  <text
+    x="470"
+    y="548"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="'Noto Sans Mono', 'NotoSansMono', monospace"
+    font-size="520"
+    font-style="italic"
+    font-weight="700"
+    fill="#FFFFFF"
+  >dr</text>
+</svg>

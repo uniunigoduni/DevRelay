@@ -158,6 +158,18 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+$iconPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\assets\devrelay-icon.png"))
+if (Test-Path -LiteralPath $iconPath) {
+  try {
+    $icon = New-Object Windows.Media.Imaging.BitmapImage
+    $icon.BeginInit()
+    $icon.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $icon.UriSource = [Uri]::new($iconPath, [UriKind]::Absolute)
+    $icon.EndInit()
+    $icon.Freeze()
+    $window.Icon = $icon
+  } catch { Write-Host "[GuiHost] Window icon load failed: $($_.Exception.Message)" }
+}
 $web = $window.FindName("WebView")
 $powerButton = $window.FindName("PowerButton")
 $settingsButton = $window.FindName("SettingsButton")
