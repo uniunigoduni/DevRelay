@@ -33,7 +33,7 @@ The MCP Inspector v2 currently requires a newer Node 22 release; DevRelay itself
 ## Build
 
 ```powershell
-cd C:\Users\<user>\Downloads\DevRelay\internal
+cd .\internal
 npm install
 npm run build
 npm test

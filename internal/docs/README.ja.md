@@ -5,7 +5,7 @@ DevRelayは、開発PCのコマンドラインをMCPクライアントから扱�
 ## ビルドとテスト
 
 ```powershell
-cd C:\Users\<user>\Downloads\DevRelay\internal
+cd .\internal
 npm install
 npm run build
 npm test
