@@ -44,3 +44,25 @@ $result | ConvertTo-Json -Compress
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("JSON array parsing ignores native stderr warnings around stdout", { skip: process.platform !== "win32" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "devrelay-provider-json-test-"));
+  try {
+    const ps1 = path.join(dir, "parse.ps1");
+    const script = `$ErrorActionPreference = "Stop"
+. '${providerTools.replaceAll("'", "''")}'
+$output = @('[', '  {"id":"abc","name":"devrelay"}', ']', '{"level":"warn","message":"outdated"}')
+$result = ConvertFrom-DevRelayJsonArrayOutput $output
+$result | ConvertTo-Json -Compress
+`;
+    await writeFile(ps1, script, "utf8");
+    const result = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1]);
+    assert.equal(result.code, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+    assert.equal(parsed.id, "abc");
+    assert.equal(parsed.name, "devrelay");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

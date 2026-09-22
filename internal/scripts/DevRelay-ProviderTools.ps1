@@ -39,6 +39,16 @@ function Invoke-DevRelayExternal([string]$FilePath, [string[]]$Arguments, [switc
   return [pscustomobject]@{ Code = $code; Output = @($output | ForEach-Object { [string]$_ }) }
 }
 
+function ConvertFrom-DevRelayJsonArrayOutput($Output) {
+  $text = @($Output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+  $start = $text.IndexOf("[")
+  $end = $text.LastIndexOf("]")
+  if ($start -lt 0 -or $end -lt $start) { throw "External command did not return a JSON array." }
+  $json = $text.Substring($start, $end - $start + 1)
+  try { return @($json | ConvertFrom-Json) }
+  catch { throw "External command returned an invalid JSON array: $($_.Exception.Message)" }
+}
+
 function Ensure-DevRelayOpenAITunnelClient {
   if (Test-Path -LiteralPath $script:DevRelayOpenAITunnelExe) { return $script:DevRelayOpenAITunnelExe }
 

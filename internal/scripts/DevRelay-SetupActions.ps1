@@ -248,8 +248,7 @@ try {
     $certPath = Join-Path $HOME ".cloudflared\cert.pem"
     if (-not (Test-Path -LiteralPath $certPath)) { throw "Sign in to Cloudflare before using this hostname." }
     $list = Invoke-DevRelayExternal $exe @("tunnel", "list", "--output", "json")
-    $tunnels = @()
-    try { $tunnels = @(($list.Output -join [Environment]::NewLine) | ConvertFrom-Json) } catch {}
+    $tunnels = ConvertFrom-DevRelayJsonArrayOutput $list.Output
     $existing = $tunnels | Where-Object { [string]$_.name -eq $tunnelName } | Select-Object -First 1
     $tunnelId = if ($existing) { [string]$existing.id } else { "" }
     if (-not $tunnelId) {
