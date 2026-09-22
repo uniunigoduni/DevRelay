@@ -2,7 +2,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$Url,
   [Parameter(Mandatory = $true)][string]$SdkRoot,
-  [Parameter(Mandatory = $true)][string]$ProfileDir
+  [Parameter(Mandatory = $true)][string]$ProfileDir,
+  [Parameter(Mandatory = $true)][string]$WindowStatePath
 )
 
 Set-StrictMode -Version Latest
@@ -158,6 +159,22 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+
+function Test-WindowDimension([double]$Value, [double]$Minimum) {
+  return -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value) -and $Value -ge $Minimum -and $Value -le 10000
+}
+
+try {
+  if (Test-Path -LiteralPath $WindowStatePath) {
+    $savedWindow = Get-Content -LiteralPath $WindowStatePath -Raw | ConvertFrom-Json
+    $savedWidth = [double]$savedWindow.width
+    $savedHeight = [double]$savedWindow.height
+    if (Test-WindowDimension $savedWidth $window.MinWidth) { $window.Width = $savedWidth }
+    if (Test-WindowDimension $savedHeight $window.MinHeight) { $window.Height = $savedHeight }
+  }
+} catch {
+  Write-Host "[GuiHost] Window size restore failed: $($_.Exception.Message)"
+}
 $iconPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\assets\devrelay-icon.png"))
 if (Test-Path -LiteralPath $iconPath) {
   try {
@@ -269,10 +286,48 @@ $window.Add_StateChanged({
   $maxButton.Content = if ($window.WindowState -eq [Windows.WindowState]::Maximized) { [char]0xE923 } else { [char]0xE922 }
 })
 
+$windowSizeTimer = New-Object Windows.Threading.DispatcherTimer
+$windowSizeTimer.Interval = [TimeSpan]::FromMilliseconds(250)
+$script:lastNormalWidth = [double]$window.Width
+$script:lastNormalHeight = [double]$window.Height
+
+function Save-WindowSize {
+  try {
+    $width = $script:lastNormalWidth
+    $height = $script:lastNormalHeight
+    if ($window.WindowState -eq [Windows.WindowState]::Normal) {
+      $width = [double]$window.ActualWidth
+      $height = [double]$window.ActualHeight
+    } elseif (-not $window.RestoreBounds.IsEmpty) {
+      $width = [double]$window.RestoreBounds.Width
+      $height = [double]$window.RestoreBounds.Height
+    }
+    if (-not (Test-WindowDimension $width $window.MinWidth) -or -not (Test-WindowDimension $height $window.MinHeight)) { return }
+    $script:lastNormalWidth = $width
+    $script:lastNormalHeight = $height
+    $parent = Split-Path -Parent $WindowStatePath
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    $json = @{ width = [Math]::Round($width, 1); height = [Math]::Round($height, 1) } | ConvertTo-Json
+    [IO.File]::WriteAllText($WindowStatePath, $json + [Environment]::NewLine, [Text.Encoding]::UTF8)
+  } catch {
+    Write-Host "[GuiHost] Window size save failed: $($_.Exception.Message)"
+  }
+}
+$windowSizeTimer.Add_Tick({ $windowSizeTimer.Stop(); Save-WindowSize })
+$window.Add_SizeChanged({
+  if ($window.WindowState -eq [Windows.WindowState]::Normal) {
+    $script:lastNormalWidth = [double]$window.ActualWidth
+    $script:lastNormalHeight = [double]$window.ActualHeight
+    $windowSizeTimer.Stop()
+    $windowSizeTimer.Start()
+  }
+})
+$window.Add_Closing({ $windowSizeTimer.Stop(); Save-WindowSize })
+
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(500)
 $timer.Add_Tick({ Refresh-State })
 $window.Add_ContentRendered({ Refresh-State; $timer.Start() })
-$window.Add_Closed({ $timer.Stop() })
+$window.Add_Closed({ $timer.Stop(); $windowSizeTimer.Stop() })
 
 [void]$window.ShowDialog()

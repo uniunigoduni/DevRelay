@@ -10,6 +10,7 @@ const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
+const windowStatePath = path.join(stateDir, "window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
@@ -447,7 +448,7 @@ async function launchWindow() {
   lastHeartbeatAt = 0;
   windowHost = spawn("powershell.exe", [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta",
-    "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile
+    "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile, "-WindowStatePath", windowStatePath
   ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
   windowHost.once("exit", () => {
     windowHost = null;

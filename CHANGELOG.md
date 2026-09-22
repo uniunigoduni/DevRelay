@@ -26,6 +26,8 @@ All notable changes to DevRelay are documented here.
 
 ### Fixed
 
+- GUI window size is now remembered locally and restored on the next launch, while maximized or minimized exits preserve the last normal size.
+
 - GUI window resizing no longer gets blocked by the WebView2 child surface on the left, right, bottom, or lower corners.
 
 - GUI log panes can now be resized with a draggable splitter, and the split ratio is remembered locally. The minimum window width was reduced from 680px to 480px.
