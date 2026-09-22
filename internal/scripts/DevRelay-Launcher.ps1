@@ -141,8 +141,8 @@ function Require-Setup {
 function Get-ConnectionDescription($Connection) {
   if ([string]$Connection.kind -eq "openai-secure-tunnel") { return "OpenAI Secure Tunnel" }
   if ([string]$Connection.provider -eq "tailscale") { return "HTTPS / Tailscale Funnel" }
-  if ([string]$Connection.provider -eq "cloudflare" -and [string]$Connection.variant -eq "quick") { return "HTTPS / Cloudflare Quick Tunnel" }
-  if ([string]$Connection.provider -eq "cloudflare" -and [string]$Connection.variant -eq "named") { return "HTTPS / Cloudflare Named Tunnel" }
+  if ([string]$Connection.provider -eq "cloudflare" -and [string]$Connection.variant -eq "quick") { return "HTTPS / Cloudflare temporary URL" }
+  if ([string]$Connection.provider -eq "cloudflare" -and [string]$Connection.variant -eq "named") { return "HTTPS / Cloudflare custom hostname" }
   return "Unknown"
 }
 function Get-TailscalePublicUrl([string]$Exe) {
@@ -161,9 +161,9 @@ function Start-TailscaleFunnel([string]$Exe) {
 function Get-CloudflareNamedSettings {
   $settings = Read-JsonFile $CloudflareNamedPath
   if ($null -eq $settings) { $settings = Read-JsonFile $LegacyNamedPath }
-  if ($null -eq $settings) { throw "Cloudflare Named Tunnel setup is incomplete. Reopen Connection Setup." }
-  if (-not [string]$settings.tunnelName -or -not [string]$settings.hostname -or -not [string]$settings.configPath) { throw "Cloudflare Named Tunnel settings are incomplete." }
-  if (-not (Test-Path -LiteralPath ([string]$settings.configPath))) { throw "Cloudflare Named Tunnel config file is missing. Reopen Connection Setup." }
+  if ($null -eq $settings) { throw "Cloudflare custom hostname setup is incomplete. Reopen Connection Setup." }
+  if (-not [string]$settings.tunnelName -or -not [string]$settings.hostname -or -not [string]$settings.configPath) { throw "Cloudflare custom hostname settings are incomplete." }
+  if (-not (Test-Path -LiteralPath ([string]$settings.configPath))) { throw "Cloudflare custom hostname config file is missing. Reopen Connection Setup." }
   return $settings
 }
 function Get-CloudflareNamedRuntimeSettings($Settings) {
@@ -179,9 +179,9 @@ function Get-CloudflareNamedRuntimeSettings($Settings) {
     $match = [regex]::Match($sourceText, '(?m)^\s*credentials-file:\s*([^#\r\n]+)')
     if ($match.Success) { $credentialsPath = $match.Groups[1].Value.Trim().Trim('"').Trim("'") }
   }
-  if (-not $tunnelId -or -not $credentialsPath) { throw "Cloudflare Named Tunnel config is missing tunnel/credentials information. Reopen Connection Setup." }
+  if (-not $tunnelId -or -not $credentialsPath) { throw "Cloudflare custom hostname config is missing tunnel/credentials information. Reopen Connection Setup." }
   if (-not [IO.Path]::IsPathRooted($credentialsPath)) { $credentialsPath = Join-Path (Split-Path -Parent $sourceConfig) $credentialsPath }
-  if (-not (Test-Path -LiteralPath $credentialsPath)) { throw "Cloudflare Named Tunnel credentials file is missing. Reopen Connection Setup." }
+  if (-not (Test-Path -LiteralPath $credentialsPath)) { throw "Cloudflare custom hostname credentials file is missing. Reopen Connection Setup." }
 
   $runtimeDir = Join-Path $StateDir "cloudflare-runtime"
   Ensure-Directory $runtimeDir
@@ -218,7 +218,7 @@ function Start-CloudflareNamed([string]$Exe, $Settings) {
     if ((Test-Path $logPath) -and ((Get-Content -Raw $logPath) -match 'Registered tunnel connection')) { return $process }
   }
   Stop-ProcessTree $process
-  throw "Cloudflare Named Tunnel did not become ready within 20 seconds."
+  throw "Cloudflare custom hostname did not become ready within 20 seconds."
 }
 function Start-CloudflareQuick([string]$Exe) {
   $logRoot = if ($env:DEVRELAY_SESSION_DIR) { $env:DEVRELAY_SESSION_DIR } else { $StateDir }
@@ -227,18 +227,18 @@ function Start-CloudflareQuick([string]$Exe) {
   $stdoutPath = Join-Path $logRoot "cloudflared-quick.stdout.log"
   $stderrPath = Join-Path $logRoot "cloudflared-quick.stderr.log"
   Remove-Item $logPath,$stdoutPath,$stderrPath -Force -ErrorAction SilentlyContinue
-  Write-Step "Creating Cloudflare Quick Tunnel..."
+  Write-Step "Creating Cloudflare temporary URL..."
   $process = Start-Process -FilePath $Exe -ArgumentList @("tunnel", "--url", "http://${HostAddress}:$Port", "--loglevel", "info", "--logfile", $logPath) -WorkingDirectory $Root -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru -WindowStyle Hidden
   for ($i = 0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 250
-    if ($process.HasExited) { throw "cloudflared Quick Tunnel exited during startup with code $($process.ExitCode)." }
+    if ($process.HasExited) { throw "cloudflared temporary URL exited during startup with code $($process.ExitCode)." }
     $text = ""
     foreach ($path in @($logPath,$stdoutPath,$stderrPath)) { if (Test-Path $path) { $text += "`n" + (Get-Content -Raw $path) } }
     $match = [regex]::Match($text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
     if ($match.Success) { return [pscustomobject]@{ Process = $process; PublicMcpUrl = ($match.Value.TrimEnd('/') + "/mcp") } }
   }
   Stop-ProcessTree $process
-  throw "Cloudflare Quick Tunnel did not provide a public URL within 20 seconds."
+  throw "Cloudflare temporary URL did not provide a public URL within 20 seconds."
 }
 function Ensure-OpenAIProfile([string]$Exe, $Config, [string]$ApiKey) {
   $tunnelId = [string](Get-ObjectValue $Config "tunnelId" "")
@@ -371,7 +371,7 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
   $named = Get-CloudflareNamedRuntimeSettings $named
   $publicMcpUrl = "https://$([string]$named.hostname)/mcp"
   Set-HttpsOAuth $publicMcpUrl
-  if ($SetupOnly) { Write-Step "Cloudflare Named Tunnel setup is ready."; exit 0 }
+  if ($SetupOnly) { Write-Step "Cloudflare custom hostname setup is ready."; exit 0 }
   $devRelayProcess = $null
   $tunnelProcess = $null
   try {
@@ -394,7 +394,7 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
 
 if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.variant -eq "quick") {
   $cloudflaredExe = Ensure-DevRelayCloudflared
-  if ($SetupOnly) { Write-Step "Cloudflare Quick Tunnel prerequisites are ready."; exit 0 }
+  if ($SetupOnly) { Write-Step "Cloudflare temporary URL prerequisites are ready."; exit 0 }
   $quick = $null
   $devRelayProcess = $null
   try {
@@ -407,7 +407,7 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
     while ($true) {
       Start-Sleep -Seconds 1
       if ($devRelayProcess.HasExited) { throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($quick.Process.HasExited) { throw "Cloudflare Quick Tunnel exited with code $($quick.Process.ExitCode)." }
+      if ($quick.Process.HasExited) { throw "Cloudflare temporary URL exited with code $($quick.Process.ExitCode)." }
     }
   } finally {
     if ($quick) { Stop-ProcessTree $quick.Process }

@@ -14,6 +14,7 @@
   --radius: 12px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { width: 100%; height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
 body, button, input { font-family: "Noto Sans Mono", Consolas, monospace; }
 button, input { font: inherit; }
@@ -32,6 +33,9 @@ h1 { margin: 5px 0 6px; font-size: 21px; line-height: 1.25; font-weight: 700; }
 .breadcrumbs { min-height: 18px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; color: var(--muted); font-size: 10px; }
 .breadcrumbs button { padding: 0; background: transparent; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .breadcrumbs .sep { opacity: .55; }
+.breadcrumbs button:disabled { cursor: default; text-decoration: none; opacity: .45; }
+.content[aria-busy="true"] { pointer-events: none; opacity: .62; }
+.content[aria-busy="true"] button, .content[aria-busy="true"] input { opacity: .35; cursor: default; }
 .content { min-height: 0; overflow: auto; padding-right: 4px; }
 .section-title { margin: 2px 0 5px; font-size: 15px; }
 .section-copy { margin: 0 0 13px; color: var(--muted); font-size: 10.5px; line-height: 1.55; }

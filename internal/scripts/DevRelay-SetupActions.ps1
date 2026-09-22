@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory = $true)]
   [ValidateSet("Status", "ConfigureOpenAI", "InstallTailscale", "TailscaleLogin", "PrepareTailscale", "EnsureCloudflared", "CloudflareLogin", "ConfigureCloudflareNamed", "PrepareCloudflareQuick", "ResetLocalConnection")]
   [string]$Action,
-  [int]$Port = 7317
+  [int]$Port = 7317,
+  [string]$InputPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -19,7 +20,13 @@ $CloudflareNamedPath = Join-Path $StateDir "cloudflare-named.json"
 $LegacyNamedPath = Join-Path $StateDir "https-named.json"
 
 function Read-InputJson {
-  $raw = [Console]::In.ReadToEnd()
+  if ([string]::IsNullOrWhiteSpace($InputPath)) { return $null }
+  if (-not (Test-Path -LiteralPath $InputPath)) { throw "Setup input file was not found." }
+  try {
+    $raw = [IO.File]::ReadAllText($InputPath, [Text.Encoding]::UTF8)
+  } finally {
+    Remove-Item -LiteralPath $InputPath -Force -ErrorAction SilentlyContinue
+  }
   if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
   return $raw | ConvertFrom-Json
 }
@@ -119,13 +126,15 @@ function Get-TailscaleDnsName($Status) {
   return $dns.TrimEnd(".")
 }
 
-switch ($Action) {
+try {
+  switch ($Action) {
   "Status" {
     $tailscaleExe = Get-DevRelayTailscaleExe
     $tailscaleStatus = if ($tailscaleExe) { Get-TailscaleStatus $tailscaleExe } else { $null }
     Write-JsonResult ([ordered]@{
       openaiClientInstalled = Test-Path -LiteralPath $script:DevRelayOpenAITunnelExe
       cloudflaredInstalled = (Test-Path -LiteralPath $script:DevRelayCloudflaredExe) -or (Test-Path -LiteralPath $script:DevRelayLegacyCloudflaredExe)
+      cloudflareLoggedIn = Test-Path -LiteralPath (Join-Path $HOME ".cloudflared\cert.pem")
       tailscaleInstalled = [bool]$tailscaleExe
       tailscaleLoggedIn = [bool](Get-TailscaleDnsName $tailscaleStatus)
       tailscaleDnsName = Get-TailscaleDnsName $tailscaleStatus
@@ -134,9 +143,9 @@ switch ($Action) {
   }
 
   "ConfigureOpenAI" {
-    $input = Read-InputJson
-    $tunnelId = [string]$input.tunnelId
-    $apiKey = [string]$input.apiKey
+    $request = Read-InputJson
+    $tunnelId = [string]$request.tunnelId
+    $apiKey = [string]$request.apiKey
     if ($tunnelId -notmatch '^tunnel_[a-z0-9]{32}$') { throw "Tunnel ID must be tunnel_ followed by 32 lowercase letters or digits." }
     if ([string]::IsNullOrWhiteSpace($apiKey)) { throw "Runtime API key is required." }
 
@@ -216,22 +225,26 @@ switch ($Action) {
 
   "CloudflareLogin" {
     $exe = Ensure-DevRelayCloudflared
-    Invoke-DevRelayExternal $exe @("tunnel", "login") | Out-Null
     $certPath = Join-Path $HOME ".cloudflared\cert.pem"
-    if (-not (Test-Path -LiteralPath $certPath)) { throw "Cloudflare login completed but cert.pem was not found." }
-    Write-JsonResult ([ordered]@{ ok = $true })
+    if (Test-Path -LiteralPath $certPath) {
+      Write-JsonResult ([ordered]@{ ok = $true; alreadySignedIn = $true })
+      break
+    }
+    Invoke-DevRelayExternal $exe @("tunnel", "login") | Out-Null
+    if (-not (Test-Path -LiteralPath $certPath)) { throw "Cloudflare sign-in completed but cert.pem was not found." }
+    Write-JsonResult ([ordered]@{ ok = $true; alreadySignedIn = $false })
     break
   }
 
   "ConfigureCloudflareNamed" {
-    $input = Read-InputJson
-    $hostname = ([string]$input.hostname).Trim().ToLowerInvariant()
-    $tunnelName = ([string]$input.tunnelName).Trim()
+    $request = Read-InputJson
+    $hostname = ([string]$request.hostname).Trim().ToLowerInvariant()
+    $tunnelName = ([string]$request.tunnelName).Trim()
     if ($hostname -notmatch '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' -or $hostname -notmatch '\.') { throw "Enter a valid full hostname such as devrelay.example.com." }
     if ([string]::IsNullOrWhiteSpace($tunnelName)) { $tunnelName = "devrelay" }
     $exe = Ensure-DevRelayCloudflared
     $certPath = Join-Path $HOME ".cloudflared\cert.pem"
-    if (-not (Test-Path -LiteralPath $certPath)) { throw "Sign in to Cloudflare before creating a Named Tunnel." }
+    if (-not (Test-Path -LiteralPath $certPath)) { throw "Sign in to Cloudflare before using this hostname." }
 
     $list = Invoke-DevRelayExternal $exe @("tunnel", "list", "--output", "json")
     $tunnels = @()
@@ -242,7 +255,7 @@ switch ($Action) {
       $created = Invoke-DevRelayExternal $exe @("tunnel", "create", $tunnelName)
       $joined = $created.Output -join [Environment]::NewLine
       $match = [regex]::Match($joined, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
-      if (-not $match.Success) { throw "Cloudflare created the tunnel but its ID could not be determined." }
+      if (-not $match.Success) { throw "Cloudflare connection was created but its ID could not be determined." }
       $tunnelId = $match.Value
     }
 
@@ -289,4 +302,8 @@ ingress:
     Write-JsonResult ([ordered]@{ ok = $true })
     break
   }
+}
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
 }

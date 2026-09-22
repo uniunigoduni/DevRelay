@@ -3,24 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const SETUP_VERSION = 1;
-export const SECURE_TUNNEL_ISSUES = [
-  {
-    number: 71,
-    title: "[Windows / Plus / v0.0.14] Tunnel connector creation fails in both No Auth and OAuth: server/discover 424 and DCR 404",
-    url: "https://github.com/openai/tunnel-client/issues/71"
-  },
-  {
-    number: 57,
-    title: "ChatGPT Manual Refresh fails after successful main/server/discover; no main/tools/list follows on v0.0.14",
-    url: "https://github.com/openai/tunnel-client/issues/57"
-  },
-  {
-    number: 41,
-    title: "ChatGPT no-auth tunnel plugin immediately enters reconnect loop",
-    url: "https://github.com/openai/tunnel-client/issues/41"
-  }
-];
-
 async function readJson(filePath) {
   try {
     const parsed = JSON.parse(await readFile(filePath, "utf8"));
@@ -61,9 +43,9 @@ export function normalizeSetupState(value) {
 export function connectionLabel(connection) {
   if (!connection) return "Not configured";
   if (connection.kind === "openai-secure-tunnel") return "OpenAI Secure Tunnel";
-  if (connection.provider === "tailscale") return "HTTPS · Tailscale Funnel";
-  if (connection.provider === "cloudflare" && connection.variant === "quick") return "HTTPS · Cloudflare Quick Tunnel";
-  if (connection.provider === "cloudflare" && connection.variant === "named") return "HTTPS · Cloudflare Named Tunnel";
+  if (connection.provider === "tailscale") return "HTTPS / Tailscale Funnel";
+  if (connection.provider === "cloudflare" && connection.variant === "quick") return "HTTPS / Cloudflare temporary URL";
+  if (connection.provider === "cloudflare" && connection.variant === "named") return "HTTPS / Cloudflare custom hostname";
   return "Unknown connection";
 }
 

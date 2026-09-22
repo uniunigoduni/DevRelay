@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { connectionLabel, connectionPublicUrl, ensureSetupState, normalizeSetupState, saveSetupState } from "./setup-state.mjs";
+import { connectionLabel, connectionPublicUrl, ensureSetupState, normalizeSetupState, resetSetupState, saveSetupState } from "./setup-state.mjs";
 
 async function tempInternal() {
   const root = await mkdtemp(path.join(os.tmpdir(), "devrelay-setup-test-"));
@@ -16,7 +16,9 @@ test("normalizes supported connection shapes", () => {
   assert.deepEqual(normalizeSetupState({ completed: true, connection: { kind: "https", provider: "cloudflare", variant: "quick", publicUrl: "ignored" } }), {
     version: 1, completed: true, connection: { kind: "https", provider: "cloudflare", variant: "quick", persistent: false }
   });
-  assert.equal(connectionLabel({ kind: "https", provider: "tailscale" }), "HTTPS · Tailscale Funnel");
+  assert.equal(connectionLabel({ kind: "https", provider: "tailscale" }), "HTTPS / Tailscale Funnel");
+  assert.equal(connectionLabel({ kind: "https", provider: "cloudflare", variant: "named" }), "HTTPS / Cloudflare custom hostname");
+  assert.equal(connectionLabel({ kind: "https", provider: "cloudflare", variant: "quick" }), "HTTPS / Cloudflare temporary URL");
   assert.equal(connectionPublicUrl({ kind: "https", provider: "cloudflare", variant: "quick" }), "Generated when DevRelay starts");
 });
 
@@ -67,4 +69,20 @@ test("existing setup state still scrubs a legacy mode key reintroduced by an old
     const settings = JSON.parse(await readFile(path.join(state, "gui-settings.json"), "utf8"));
     assert.equal("mode" in settings, false);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("reset clears the current connection state", async () => {
+  const { root, internal } = await tempInternal();
+  try {
+    await saveSetupState(internal, {
+      completed: true,
+      connection: { kind: "https", provider: "tailscale", publicUrl: "https://pc.tailnet.ts.net/mcp" }
+    });
+    const reset = await resetSetupState(internal);
+    assert.deepEqual(reset, { version: 1, completed: false, connection: null });
+    const persisted = JSON.parse(await readFile(path.join(internal, ".devrelay", "setup.json"), "utf8"));
+    assert.deepEqual(persisted, reset);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

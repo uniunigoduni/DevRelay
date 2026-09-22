@@ -270,7 +270,8 @@ function Refresh-State {
     $powerButton.Content = if ($active) { "STOP" } else { "START" }
     $powerButton.Background = Brush $(if ($active) { "#D92D20" } else { "#B42318" })
     $powerButton.Foreground = Brush "#FFFFFF"
-    $powerButton.IsEnabled = -not [bool]$state.stopping -and -not $script:busy
+    $canStartOrStop = $active -or [bool]$state.setupComplete
+    $powerButton.IsEnabled = $canStartOrStop -and -not [bool]$state.stopping -and -not $script:busy
   } catch { $powerButton.IsEnabled = $false }
 }
 $powerButton.Add_Click({
