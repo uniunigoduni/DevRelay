@@ -39,16 +39,13 @@ devrelay --http
 
 MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一般的なGUI自動操作API、組み込みトンネル、LLM/エージェント機能を含めません。PTY/ConPTYと画像返却は、CLIだけでは不足する部分を既存6ツールのオプションとして最小限補完します。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。
 
-## Windowsでは2つのランチャーを使う
+## WindowsではDevRelay.cmdを使う
 
-通常は用途に応じて、プロジェクト直下の `DevRelay ChatGPT.cmd` または `DevRelay HTTPS.cmd` をダブルクリックします。
-
-- `DevRelay ChatGPT.cmd`: GUIをOpenAI Secure MCP Tunnelモードで開きます。
-- `DevRelay HTTPS.cmd`: GUIをCloudflare Named Tunnelモードで開きます。固定HTTPS URLのMCPはOAuth 2.1（Authorization Code + PKCE）で保護されます。
+通常はプロジェクト直下の `DevRelay.cmd` をダブルクリックします。起動ファイル側では接続モードを選びません。設定パネルの `Mode` が唯一の設定元で、初回は `HTTPS Named Tunnel`、以後は保存した `HTTPS Named Tunnel` / `OpenAI Secure Tunnel` の選択をそのまま復元します。
 
 HTTPSモードでChatGPTなどがOAuth認可を開始すると、設定パネルが自動で開いて接続元・リダイレクト先・scopeを表示します。ローカルGUIでApproveした場合だけ認可コードが発行され、Denyなら拒否されます。公開ブラウザ画面だけでは承認できません。
 
-GUIはOS標準フレームを使わないWPF/WebView2ウィンドウで、既定サイズは780×560です。本文は `Command log` と `Server log` だけに絞り、赤いStart/Stopと歯車は自前タイトルバーに置きます。最小化・最大化/復元・閉じるは `audio-router` と同じSegoe Fluent Iconsのグリフ方式です。フォントはNoto Sans Monoで、未導入PCではランチャーがGoogle Fonts公式版を現在ユーザーへ導入します。テーマは `vault-edit` と同じ `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。各ウィンドウ起動のログは `internal/.devrelay/logs/` に保存し、直近3回だけ保持します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。
+GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log` だけに絞り、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Monoで、未導入PCではランチャーがGoogle Fonts公式版を現在ユーザーへ導入します。テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。各ウィンドウ起動のログは `internal/.devrelay/logs/` に保存し、直近3回だけ保持します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。
 
 ## 複数デバイス
 

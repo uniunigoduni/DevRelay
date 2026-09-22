@@ -17,9 +17,7 @@
     "test": "npm run build && node --test --test-force-exit dist/test/*.test.js",
     "start": "node dist/src/main.js",
     "start:http": "node dist/src/main.js --http",
-    "launch": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\DevRelay-Launcher.ps1",
-    "gui:https": "node gui/devrelay-gui.mjs --mode=https",
-    "gui:chatgpt": "node gui/devrelay-gui.mjs --mode=chatgpt",
+    "gui": "node gui/devrelay-gui.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {

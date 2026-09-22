@@ -6,7 +6,7 @@ DevRelay is intentionally powerful: an authorized MCP caller can execute arbitra
 
 HTTP mode binds to `127.0.0.1` by default. For loopback binds, DevRelay composes the MCP Node adapter's localhost Host and Origin validation in front of the MCP handler.
 
-Remote use keeps this loopback listener. The Windows HTTPS Named Tunnel launcher enables DevRelay OAuth 2.1 and requires a Bearer token on `/mcp`; raw local HTTP and stdio do not enable OAuth unless its environment is configured.
+Remote use keeps this loopback listener. HTTPS Named Tunnel mode in the Windows GUI enables DevRelay OAuth 2.1 and requires a Bearer token on `/mcp`; raw local HTTP and stdio do not enable OAuth unless its environment is configured.
 
 ## Operating-system permissions
 
@@ -30,7 +30,7 @@ Security policy remains separate from the command engine. HTTPS OAuth wraps the 
 
 ## Visible control GUI
 
-The Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changing requests from other browser origins, and waits for a heartbeat from the visible app window before auto-starting DevRelay. Closing the GUI or losing its heartbeat stops the launcher-managed DevRelay/tunnel process tree. There is no tray/background-only mode in the normal launchers.
+The Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changing requests from other browser origins, and waits for a heartbeat from the visible app window before auto-starting DevRelay. Closing the GUI or losing its heartbeat stops the launcher-managed DevRelay/tunnel process tree. There is no tray/background-only mode in the normal launcher.
 
 ## Public HTTPS mode
 

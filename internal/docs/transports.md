@@ -28,7 +28,7 @@ The MCP endpoint is `http://127.0.0.1:7317/mcp`. The implementation uses the MCP
 
 ## Remote access
 
-DevRelay does not contain a tunnel. Keep the default loopback listener and expose it through the remote-access layer you control. For ChatGPT development, OpenAI's Developer Mode / Secure MCP Tunnel flow can be placed in front of the local `/mcp` endpoint. The Windows Cloudflare Named Tunnel launcher instead enables DevRelay's built-in OAuth 2.1 layer and exposes discovery, DCR, authorization, token, and protected MCP endpoints through the same fixed HTTPS hostname.
+DevRelay does not contain a tunnel. Keep the default loopback listener and expose it through the remote-access layer you control. For ChatGPT development, OpenAI's Developer Mode / Secure MCP Tunnel flow can be placed in front of the local `/mcp` endpoint. HTTPS Named Tunnel mode in the Windows GUI instead enables DevRelay's built-in OAuth 2.1 layer and exposes discovery, DCR, authorization, token, and protected MCP endpoints through the same fixed HTTPS hostname.
 
 DevRelay can bind a non-loopback address with `--host`, but that is an explicit deployment choice; the built-in localhost Host/Origin guards are only applied for loopback binds.
 
@@ -46,13 +46,18 @@ The HTTP MCP server instance is request-scoped as recommended by the current SDK
 
 ## Windows launcher integration
 
-The DevRelay server core still does not embed a tunnel protocol. On Windows, `DevRelay ChatGPT.cmd` manages the official OpenAI `tunnel-client` beside DevRelay as a separate supervised process; `DevRelay HTTPS.cmd` uses the bundled `cloudflared.exe` with a machine-local Cloudflare Named Tunnel configuration for fixed-hostname HTTPS access.
+The DevRelay server core still does not embed a tunnel protocol. On Windows, the single `DevRelay.cmd` launcher opens the GUI, and the saved Settings mode decides which supervised remote-access layer is started:
 
-On first use the launcher downloads the official Windows bundle, materializes a `sample_mcp_remote_no_auth` profile pointing at the local `/mcp` endpoint, runs `tunnel-client doctor --explain`, and then starts `tunnel-client run`. This keeps the MCP server itself small while making the normal user workflow one command.
+- `OpenAI Secure Tunnel`: the official OpenAI `tunnel-client` runs beside DevRelay.
+- `HTTPS Named Tunnel`: bundled `cloudflared.exe` uses the machine-local Cloudflare Named Tunnel configuration for fixed-hostname HTTPS access.
+
+The GUI passes the selected mode explicitly to the internal PowerShell worker. The launcher filename itself never selects or overrides the transport.
+
+On first use of OpenAI Secure Tunnel mode the worker downloads the official Windows bundle, materializes a `sample_mcp_remote_no_auth` profile pointing at the local `/mcp` endpoint, runs `tunnel-client doctor --explain`, and then starts `tunnel-client run`.
 
 ## OAuth in HTTPS Named Tunnel mode
 
-`DevRelay HTTPS.cmd` sets the public issuer/resource automatically. `/mcp` requires the `devrelay` scope and advertises `offline_access`. Authorization Code + PKCE (`S256`) and DCR are supported. The browser authorization page cannot grant access by itself; the request must be approved in the visible local GUI. OAuth clients, the signing key, and hashed refresh-token records live under `.devrelay/oauth/`.
+When Settings selects HTTPS Named Tunnel, the GUI sets the public issuer/resource automatically. `/mcp` requires the `devrelay` scope and advertises `offline_access`. Authorization Code + PKCE (`S256`) and DCR are supported. The browser authorization page cannot grant access by itself; the request must be approved in the visible local GUI. OAuth clients, the signing key, and hashed refresh-token records live under `.devrelay/oauth/`.
 
 ## Multiple devices
 

@@ -23,9 +23,6 @@ const webView2Root = path.join(stateDir, "webview2-sdk");
 const fontRoot = path.join(stateDir, "fonts");
 const logsRoot = path.join(stateDir, "logs");
 
-const modeArg = process.argv.find((arg) => arg.startsWith("--mode="));
-const requestedMode = modeArg?.split("=")[1] === "chatgpt" ? "chatgpt" : "https";
-
 async function existingGuiIsRunning() {
   return new Promise((resolve) => {
     const req = http.get({ host: "127.0.0.1", port: guiPort, path: "/api/state", timeout: 500 }, (res) => {
@@ -67,16 +64,13 @@ async function pruneLogSessions() {
 }
 await pruneLogSessions();
 
-let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, mode: requestedMode };
+let settings = await loadSettings();
+let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, mode: settings.mode, theme: settings.theme };
 async function persistSessionMeta(values = {}) {
   sessionMeta = { ...sessionMeta, ...values };
   await writeFile(sessionPath, `${JSON.stringify(sessionMeta, null, 2)}\n`, "utf8");
 }
 await persistSessionMeta();
-
-let settings = await loadSettings();
-settings.mode = requestedMode;
-await persistSessionMeta({ mode: settings.mode, theme: settings.theme });
 let runtime = null;
 let windowHost = null;
 let shuttingDown = false;
@@ -122,13 +116,13 @@ async function loadSettings() {
   try {
     const parsed = JSON.parse(await readFile(settingsPath, "utf8"));
     return {
-      mode: requestedMode,
+      mode: parsed.mode === "chatgpt" ? "chatgpt" : "https",
       port: Number.isInteger(parsed.port) ? parsed.port : 7317,
       autoStart: parsed.autoStart !== false,
       theme: parsed.theme === "black-soft" ? "black-soft" : "white-soft"
     };
   } catch {
-    return { mode: requestedMode, port: 7317, autoStart: true, theme: "white-soft" };
+    return { mode: "https", port: 7317, autoStart: true, theme: "white-soft" };
   }
 }
 async function saveSettings() {
@@ -214,9 +208,9 @@ async function startRuntime() {
   const args = [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
     "-File", launcherPath,
+    "-Mode", settings.mode,
     "-Port", String(settings.port)
   ];
-  if (settings.mode === "https") args.push("-HttpsDirect");
 
   oauthControlSecret = `${randomUUID()}${randomUUID()}`.replaceAll("-", "");
   oauthPending = [];
@@ -396,6 +390,7 @@ const server = http.createServer(async (req, res) => {
       settings = { mode, port, autoStart, theme };
       publicUrl = await resolvePublicUrl(settings.mode);
       await saveSettings();
+      await persistSessionMeta({ mode: settings.mode, theme: settings.theme });
       return sendJson(res, 200, snapshot());
     }
 

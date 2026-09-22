@@ -6,7 +6,7 @@ All notable changes to DevRelay are documented here.
 
 ### Added
 
-- Added `DevRelay ChatGPT.cmd` and `DevRelay HTTPS.cmd` as the two user-facing Windows launchers.
+- Added `DevRelay.cmd` as the single user-facing Windows launcher; connection mode is selected and persisted in GUI Settings.
 - Added a compact custom-framed WPF/WebView2 control GUI with title-bar Start/Stop control.
 - Added separate `Command log` and `Server log` views with a default 780×560 layout.
 - Added a gear-triggered settings panel for connection mode, MCP port, and launch-time auto-start.
@@ -35,6 +35,7 @@ All notable changes to DevRelay are documented here.
 
 ### Changed
 
+- Consolidated the former mode-specific Windows launchers and GUI command-line mode overrides into one saved Settings-driven launch flow. The internal PowerShell worker now uses explicit `-Mode https|chatgpt` selection.
 - Windows PowerShell normalization now executes the decoded command from an ephemeral UTF-16LE script file, preserving quoting, variable expansion, readable error output, and exit semantics without re-parsing through a nested native `powershell.exe -Command` call.
 
 - Windows non-PTY `cmd`/`auto` and Windows PowerShell output is now normalized to UTF-8 instead of guessing encodings from byte content. Added explicit `outputEncoding` overrides backed by `iconv-lite` for known legacy/OEM code pages such as CP932, CP437, and CP850.

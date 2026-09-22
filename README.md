@@ -12,7 +12,7 @@ DevRelay is currently **v0.1.0**. The initial implementation targets development
 
 - MCP over stdio.
 - MCP over Streamable HTTP.
-- OAuth 2.1 Authorization Code + PKCE with DCR for the public HTTPS Named Tunnel launcher.
+- OAuth 2.1 Authorization Code + PKCE with DCR for public HTTPS Named Tunnel mode.
 - Arbitrary one-shot command execution.
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
@@ -148,14 +148,12 @@ MIT. See [LICENSE](LICENSE).
 
 The implementation patterns and interoperability references used for v0.1 are documented in [docs/references.md](internal/docs/references.md).
 
-## Windows double-click launchers
+## Windows double-click launcher
 
-For normal Windows use, two no-argument launchers are provided:
+For normal Windows use, double-click `DevRelay.cmd`. It opens the local WPF/WebView2 control GUI without a terminal window. The connection mode is not chosen by the launcher; the saved `Mode` in Settings is the single source of truth. The first launch defaults to `HTTPS Named Tunnel`, and later launches restore the saved choice between HTTPS Named Tunnel and OpenAI Secure MCP Tunnel.
 
-- `DevRelay ChatGPT.cmd` opens the local control GUI in OpenAI Secure MCP Tunnel mode.
-- `DevRelay HTTPS.cmd` opens the same GUI in Cloudflare Named Tunnel mode with a fixed public HTTPS MCP URL protected by OAuth 2.1.
+The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480×480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Connection and device settings can be edited while stopped; an incoming HTTPS OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its active tunnel.
 
-A compact custom-framed WPF/WebView2 window stays visible while DevRelay is available. The default 780×560 layout is native: the body contains only `Command log` and `Server log`, while Start/Stop and the settings button live in the custom title bar. The window controls use the same Segoe Fluent Icons glyph pattern as `audio-router`. The UI uses Noto Sans Mono and supports the exact `#FFFFFF Soft` (default) and `#000000 Soft` palettes from `vault-edit`. Settings stay hidden until the gear button is pressed; the local device name/aliases can be edited while stopped, and an incoming OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its tunnel. Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, and credentials remain under `.devrelay` and excluded from Git.
+Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.
-

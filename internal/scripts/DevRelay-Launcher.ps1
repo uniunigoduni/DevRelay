@@ -2,7 +2,7 @@
 param(
   [switch]$SetupOnly,
   [switch]$NoTunnel,
-  [switch]$HttpsDirect,
+  [ValidateSet("https", "chatgpt")][string]$Mode = "chatgpt",
   [switch]$ForceSetup,
   [switch]$ResetTunnel,
   [switch]$Status,
@@ -83,7 +83,7 @@ function Ensure-Build {
   $node = Get-Command node.exe -ErrorAction SilentlyContinue
   $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
   if (-not $node -or -not $npm) {
-    throw "Node.js 20+ and npm are required. Install Node.js, then rerun one of the DevRelay launchers."
+    throw "Node.js 20+ and npm are required. Install Node.js, then rerun DevRelay.cmd."
   }
 
   $state = Read-JsonFile $StatePath
@@ -395,7 +395,7 @@ if ($Status) {
 
 $nodeExe = Ensure-Build
 
-if ($HttpsDirect) {
+if ($Mode -eq "https") {
   [void](Ensure-TunnelClient)
   if ($SetupOnly) {
     Write-Step "HTTPS direct-mode prerequisites are ready."
