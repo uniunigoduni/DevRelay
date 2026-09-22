@@ -4,6 +4,8 @@ All notable changes to DevRelay are documented here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-22
+
 ### Added
 
 - Added a release-only Windows bootstrap updater that checks GitHub's latest published release and applies only safe official-origin clean-worktree fast-forwards before the GUI starts.

@@ -126,7 +126,7 @@ export function compactProcessListItem(process: ReturnType<ProcessManager["list"
 }
 
 export function createDevRelayServer(manager: ProcessManager, identity: DeviceIdentity): McpServer {
-  const server = new McpServer({ name: "devrelay", version: "0.1.0" });
+  const server = new McpServer({ name: "devrelay", version: "0.2.0" });
 
   server.registerTool(
     "exec",

@@ -6,7 +6,7 @@ import { createDevRelayServer } from "./mcp-server.js";
 import { ProcessManager } from "./process-manager.js";
 import { loadDeviceIdentity } from "./device-identity.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 type Transport = "stdio" | "http";
 

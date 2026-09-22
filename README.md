@@ -6,7 +6,7 @@ The design rule is simple: **if a task can already be done by a CLI, DevRelay do
 
 ## Status
 
-DevRelay is currently **v0.1.0**. The initial implementation targets development use on Windows while keeping the process layer portable to other Node.js platforms.
+DevRelay is currently **v0.2.0**. The project targets development use on Windows while keeping the process layer portable to other Node.js platforms.
 
 ## Features
 
