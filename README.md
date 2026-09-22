@@ -134,6 +134,8 @@ Completed managed processes remain in memory for 10 minutes so their final outpu
 - [Transports and remote access](internal/docs/transports.md)
 - [Development guide](internal/docs/development.md)
 - [Security model](internal/docs/security.md)
+- [Security reporting](SECURITY.md)
+- [AI agent guide](AGENTS.md)
 - [Design decisions and non-goals](internal/docs/design.md)
 
 ## Development philosophy
@@ -142,11 +144,19 @@ DevRelay is infrastructure glue, not a remote IDE and not an autonomous agent. N
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Current DevRelay source is available under the **PolyForm Noncommercial License 1.0.0**. Noncommercial use, modification, and redistribution are permitted by that license; commercial use is not granted by the public license. See [LICENSE](LICENSE).
+
+Earlier revisions that were published under MIT remain available under the license that applied to those revisions; this license change is not retroactive.
 
 ## Upstream references
 
 The implementation patterns and interoperability references used for v0.1 are documented in [docs/references.md](internal/docs/references.md).
+
+## Automatic release updates
+
+On Windows, `DevRelay.cmd` checks for the latest **published GitHub Release** before starting the GUI. Ordinary pushes to `main`, standalone tags, drafts, and prereleases are not an update channel.
+
+An update is applied only when the checkout uses the official DevRelay `origin`, the Git worktree is clean, and the current commit can fast-forward to the release commit. Development checkouts that are ahead of a release, diverged checkouts, forks, dirty worktrees, offline machines, and non-Git source archives are left untouched and start normally. Machine-local `.devrelay` state is not part of Git and is preserved.
 
 ## Windows double-click launcher
 

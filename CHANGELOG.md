@@ -6,6 +6,9 @@ All notable changes to DevRelay are documented here.
 
 ### Added
 
+- Added a release-only Windows bootstrap updater that checks GitHub's latest published release and applies only safe official-origin clean-worktree fast-forwards before the GUI starts.
+- Added `AGENTS.md` guidance requiring explicit user permission before AI agents publish upstream pull requests or issues, plus a root `SECURITY.md` for private vulnerability reporting guidance.
+
 - Added `DevRelay.cmd` as the single user-facing Windows launcher; connection mode is selected and persisted in GUI Settings.
 - Added a compact custom-framed WPF/WebView2 control GUI with title-bar Start/Stop control.
 - Added separate `Command log` and `Server log` views with a default 780×560 layout.
@@ -34,6 +37,8 @@ All notable changes to DevRelay are documented here.
 - GUI custom scrollbars now follow the active surface: log scrollbars stay hidden while Settings is open, and the Settings scrollbar stays hidden on the default log view.
 
 ### Changed
+
+- Changed the current public source license from MIT to PolyForm Noncommercial 1.0.0. Previously published MIT revisions keep their original license; the change is not retroactive.
 
 - MCP tool results now default to compact JSON that omits repeated device/default metadata while preserving full results through `detail=full`; managed-process retention and output limits are unchanged. `process_list` now shows running processes by default and can include retained completed processes on demand.
 - Added a tracked self-restart helper for safely handing GUI/controller/runtime restart outside the current DevRelay process tree.

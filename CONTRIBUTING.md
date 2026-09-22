@@ -23,3 +23,9 @@ Use strict TypeScript and ESM imports. Prefer Node standard-library APIs. Avoid 
 ## Dependencies
 
 New runtime dependencies require a clear reason. Convenience packages for argument parsing, logging, file utilities, or test orchestration should generally not be added when a small standard-library implementation is sufficient.
+
+## Contribution license
+
+Contributions are accepted under the project license in effect when they are submitted. Do not submit code that you do not have the right to contribute. If maintainers need additional rights for a particular contribution, they will request them separately before merging.
+
+AI-assisted changes are welcome, but an AI agent must not open or submit an upstream pull request on a user's behalf without that user's explicit permission. See [AGENTS.md](AGENTS.md).

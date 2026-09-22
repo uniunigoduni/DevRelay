@@ -13,6 +13,7 @@ const stateDir = path.join(internalRoot, ".devrelay");
 const windowStatePath = path.join(stateDir, "window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
+const updateStatePath = path.join(stateDir, "update-state.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
 const guiPort = 7318;
 const hostDir = path.join(guiDir, "host");
@@ -111,6 +112,16 @@ function pushLog(target, message, level = "info") {
   const logPath = target === aiLogs ? commandLogPath : target === pluginLogs ? serverLogPath : null;
   if (logPath) appendFileSync(logPath, `${at} [${String(level).toUpperCase()}] ${text.replace(/\r?\n/g, "\\n")}\n`, "utf8");
 }
+
+async function logUpdateState() {
+  try {
+    const value = JSON.parse(await readFile(updateStatePath, "utf8"));
+    const suffix = value.tag ? ` (${value.tag})` : "";
+    const level = value.status === "error" ? "error" : "info";
+    pushLog(pluginLogs, `[Update] ${value.message ?? value.status}${suffix}`, level);
+  } catch { }
+}
+await logUpdateState();
 
 async function loadSettings() {
   try {

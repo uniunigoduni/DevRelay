@@ -43,6 +43,8 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 
 通常はプロジェクト直下の `DevRelay.cmd` をダブルクリックします。起動ファイル側では接続モードを選びません。設定パネルの `Mode` が唯一の設定元で、初回は `HTTPS Named Tunnel`、以後は保存した `HTTPS Named Tunnel` / `OpenAI Secure Tunnel` の選択をそのまま復元します。
 
+起動前にGitHubの最新published Releaseだけを確認し、公式`origin`・cleanなGit worktree・fast-forward可能という条件が揃う場合だけ自動更新します。通常の`main`へのpush、prerelease、fork、dirty checkout、releaseより先行している開発checkoutは自動更新しません。Git checkoutではないZIP展開版も自動更新対象外です。
+
 HTTPSモードでChatGPTなどがOAuth認可を開始すると、設定パネルが自動で開いて接続元・リダイレクト先・scopeを表示します。ローカルGUIでApproveした場合だけ認可コードが発行され、Denyなら拒否されます。公開ブラウザ画面だけでは承認できません。
 
 GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log` だけに絞り、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Monoで、未導入PCではランチャーがGoogle Fonts公式版を現在ユーザーへ導入します。テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。各ウィンドウ起動のログは `internal/.devrelay/logs/` に保存し、直近3回だけ保持します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。

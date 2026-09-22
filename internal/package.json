@@ -4,7 +4,7 @@
   "private": true,
   "description": "A minimal MCP bridge for arbitrary command-line execution on a development machine.",
   "type": "module",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "bin": {
     "devrelay": "dist/src/main.js"
   },

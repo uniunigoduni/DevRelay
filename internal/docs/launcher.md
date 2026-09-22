@@ -6,6 +6,12 @@ DevRelay has one normal user-facing launcher in the project root:
 
 The launcher immediately hands off to a hidden local controller and shows a compact custom-framed WPF window hosting WebView2 instead of keeping a terminal open. The initial window is 780×560 with a 480×480 minimum; the last normal window size is remembered locally and restored on the next launch.
 
+## Release updates
+
+Before the GUI controller starts, `gui/Bootstrap-DevRelayGui.ps1` runs the release updater. It checks only GitHub's latest published full Release; ordinary branch pushes and prereleases are not followed.
+
+The updater modifies the checkout only when `origin` is the official DevRelay repository, the Git worktree is clean, and the current commit can fast-forward to the release commit. Forks, dirty worktrees, source archives without `.git`, offline machines, and development checkouts ahead of the release are left untouched. When an update is applied, the normal launcher setup prepares dependencies/build before the updated GUI starts. The last update-check result is written under `.devrelay/update-state.json` and shown in the Server log.
+
 ## Mode selection
 
 The GUI Settings value is the single source of truth for connection mode. The first launch defaults to `HTTPS Named Tunnel`. After that, `gui-settings.json` restores the saved choice between:
@@ -44,6 +50,8 @@ The GUI invokes the same worker with `-Mode chatgpt`. The worker validates and s
 - `gui/public/`: the Noto Sans Mono log/settings interface with Soft light/dark themes.
 - `gui/host/`: custom WPF window chrome and WebView2 host/setup scripts.
 - `gui/launch.vbs`: hidden no-argument handoff from `DevRelay.cmd`.
+- `gui/Bootstrap-DevRelayGui.ps1`: single-instance startup bootstrap and release-update handoff.
+- `scripts/Update-DevRelayFromRelease.ps1`: safe release-only Git updater.
 - `scripts/DevRelay-Launcher.ps1`: internal build, MCP, and tunnel setup/supervision worker. The GUI passes `-Mode https` or `-Mode chatgpt` explicitly.
 
 Mutable launcher data remains under `internal/.devrelay/`: tunnel state, GUI settings, window state, WebView2 profile/SDK cache, optional font cache, OAuth state, and logs. Each visible window launch gets its own `logs/yyyyMMdd-HHmmss-xxxxxxxx/` directory; only the latest three visible launches are retained.
