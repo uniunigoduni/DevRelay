@@ -9,7 +9,9 @@ param(
   [ValidateRange(480, 2000)][double]$InitialWidth = 780,
   [ValidateRange(480, 1600)][double]$InitialHeight = 560,
   [ValidateRange(400, 1200)][double]$MinimumWidth = 480,
-  [ValidateRange(360, 1200)][double]$MinimumHeight = 480
+  [ValidateRange(360, 1200)][double]$MinimumHeight = 480,
+  [string]$CascadeFromStatePath = "",
+  [ValidateRange(0, 200)][double]$CascadeOffset = 40
 )
 
 Set-StrictMode -Version Latest
@@ -36,7 +38,7 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="DevRelay" Width="780" Height="560" MinWidth="480" MinHeight="480"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
+        WindowStartupLocation="Manual" WindowStyle="None" ResizeMode="CanResize"
         Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
         FontFamily="Noto Sans Mono" UseLayoutRounding="True" SnapsToDevicePixels="True">
   <shell:WindowChrome.WindowChrome>
@@ -175,6 +177,12 @@ function Test-WindowDimension([double]$Value, [double]$Minimum) {
   return -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value) -and $Value -ge $Minimum -and $Value -le 10000
 }
 
+function Test-WindowCoordinate([double]$Value) {
+  return -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value) -and $Value -ge -32000 -and $Value -le 32000
+}
+
+$savedLeft = $null
+$savedTop = $null
 try {
   if (Test-Path -LiteralPath $WindowStatePath) {
     $savedWindow = Get-Content -LiteralPath $WindowStatePath -Raw | ConvertFrom-Json
@@ -182,10 +190,49 @@ try {
     $savedHeight = [double]$savedWindow.height
     if (Test-WindowDimension $savedWidth $window.MinWidth) { $window.Width = $savedWidth }
     if (Test-WindowDimension $savedHeight $window.MinHeight) { $window.Height = $savedHeight }
+    if ($savedWindow.PSObject.Properties.Name -contains "left") {
+      if (Test-WindowCoordinate ([double]$savedWindow.left)) { $savedLeft = [double]$savedWindow.left }
+    }
+    if ($savedWindow.PSObject.Properties.Name -contains "top") {
+      if (Test-WindowCoordinate ([double]$savedWindow.top)) { $savedTop = [double]$savedWindow.top }
+    }
   }
 } catch {
-  Write-Host "[GuiHost] Window size restore failed: $($_.Exception.Message)"
+  Write-Host "[GuiHost] Window state restore failed: $($_.Exception.Message)"
 }
+
+$work = [Windows.SystemParameters]::WorkArea
+$window.Left = if ($null -ne $savedLeft) { $savedLeft } else { $work.Left + [Math]::Max(0, ($work.Width - $window.Width) / 2) }
+$window.Top = if ($null -ne $savedTop) { $savedTop } else { $work.Top + [Math]::Max(0, ($work.Height - $window.Height) / 2) }
+$virtualLeft = [Windows.SystemParameters]::VirtualScreenLeft
+$virtualTop = [Windows.SystemParameters]::VirtualScreenTop
+$virtualRight = $virtualLeft + [Windows.SystemParameters]::VirtualScreenWidth
+$virtualBottom = $virtualTop + [Windows.SystemParameters]::VirtualScreenHeight
+$window.Left = [Math]::Min([Math]::Max($window.Left, $virtualLeft), [Math]::Max($virtualLeft, $virtualRight - $window.Width))
+$window.Top = [Math]::Min([Math]::Max($window.Top, $virtualTop), [Math]::Max($virtualTop, $virtualBottom - $window.Height))
+try {
+  if ($CascadeFromStatePath -and (Test-Path -LiteralPath $CascadeFromStatePath)) {
+    $anchor = Get-Content -LiteralPath $CascadeFromStatePath -Raw | ConvertFrom-Json
+    $hasLeft = $anchor.PSObject.Properties.Name -contains "left"
+    $hasTop = $anchor.PSObject.Properties.Name -contains "top"
+    if ($hasLeft -and $hasTop) {
+      $anchorLeft = [double]$anchor.left
+      $anchorTop = [double]$anchor.top
+    } else {
+      $anchorLeft = [double]::NaN
+      $anchorTop = [double]::NaN
+    }
+    if ((Test-WindowCoordinate $anchorLeft) -and (Test-WindowCoordinate $anchorTop)) {
+      $candidateLeft = $anchorLeft + $CascadeOffset
+      $candidateTop = $anchorTop + $CascadeOffset
+      $window.Left = [Math]::Min([Math]::Max($candidateLeft, $virtualLeft), [Math]::Max($virtualLeft, $virtualRight - $window.Width))
+      $window.Top = [Math]::Min([Math]::Max($candidateTop, $virtualTop), [Math]::Max($virtualTop, $virtualBottom - $window.Height))
+    }
+  }
+} catch {
+  Write-Host "[GuiHost] Window cascade positioning failed: $($_.Exception.Message)"
+}
+$window.ShowActivated = $true
 $iconPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\assets\devrelay-icon.png"))
 if (Test-Path -LiteralPath $iconPath) {
   try {
@@ -310,24 +357,35 @@ $windowSizeTimer = New-Object Windows.Threading.DispatcherTimer
 $windowSizeTimer.Interval = [TimeSpan]::FromMilliseconds(250)
 $script:lastNormalWidth = [double]$window.Width
 $script:lastNormalHeight = [double]$window.Height
+$script:lastNormalLeft = [double]$window.Left
+$script:lastNormalTop = [double]$window.Top
 
 function Save-WindowSize {
   try {
     $width = $script:lastNormalWidth
     $height = $script:lastNormalHeight
+    $left = $script:lastNormalLeft
+    $top = $script:lastNormalTop
     if ($window.WindowState -eq [Windows.WindowState]::Normal) {
       $width = [double]$window.ActualWidth
       $height = [double]$window.ActualHeight
+      $left = [double]$window.Left
+      $top = [double]$window.Top
     } elseif (-not $window.RestoreBounds.IsEmpty) {
       $width = [double]$window.RestoreBounds.Width
       $height = [double]$window.RestoreBounds.Height
+      $left = [double]$window.RestoreBounds.Left
+      $top = [double]$window.RestoreBounds.Top
     }
     if (-not (Test-WindowDimension $width $window.MinWidth) -or -not (Test-WindowDimension $height $window.MinHeight)) { return }
     $script:lastNormalWidth = $width
     $script:lastNormalHeight = $height
+    if (-not (Test-WindowCoordinate $left) -or -not (Test-WindowCoordinate $top)) { return }
+    $script:lastNormalLeft = $left
+    $script:lastNormalTop = $top
     $parent = Split-Path -Parent $WindowStatePath
     if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-    $json = @{ width = [Math]::Round($width, 1); height = [Math]::Round($height, 1) } | ConvertTo-Json
+    $json = @{ width = [Math]::Round($width, 1); height = [Math]::Round($height, 1); left = [Math]::Round($left, 1); top = [Math]::Round($top, 1) } | ConvertTo-Json
     [IO.File]::WriteAllText($WindowStatePath, $json + [Environment]::NewLine, [Text.Encoding]::UTF8)
   } catch {
     Write-Host "[GuiHost] Window size save failed: $($_.Exception.Message)"
@@ -342,12 +400,30 @@ $window.Add_SizeChanged({
     $windowSizeTimer.Start()
   }
 })
+$window.Add_LocationChanged({
+  if ($window.WindowState -eq [Windows.WindowState]::Normal) {
+    $script:lastNormalLeft = [double]$window.Left
+    $script:lastNormalTop = [double]$window.Top
+    $windowSizeTimer.Stop()
+    $windowSizeTimer.Start()
+  }
+})
 $window.Add_Closing({ $windowSizeTimer.Stop(); Save-WindowSize })
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(500)
 $timer.Add_Tick({ Refresh-State })
-$window.Add_ContentRendered({ Refresh-State; $timer.Start() })
+$window.Add_ContentRendered({
+  try {
+    $window.Topmost = $true
+    [void]$window.Activate()
+    [void]$window.Focus()
+    $window.Topmost = $false
+  } catch {}
+  Save-WindowSize
+  Refresh-State
+  $timer.Start()
+})
 $window.Add_Closed({ $timer.Stop(); $windowSizeTimer.Stop() })
 
 [void]$window.ShowDialog()

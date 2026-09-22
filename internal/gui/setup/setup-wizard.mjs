@@ -28,6 +28,7 @@ const webView2Root = path.join(stateDir, "webview2-sdk");
 const fontRoot = path.join(stateDir, "fonts");
 const profileDir = path.join(stateDir, "setup-webview2-profile");
 const windowStatePath = path.join(stateDir, "setup-window-state.json");
+const mainWindowStatePath = path.join(stateDir, "window-state.json");
 const setupActionsPath = path.join(internalRoot, "scripts", "DevRelay-SetupActions.ps1");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const mainGuiPath = path.join(guiDir, "devrelay-gui.mjs");
@@ -131,7 +132,8 @@ async function startMainGuiForRegistration() {
   let mainState = await readMainGuiState();
   if (!mainState) {
     const child = spawn(process.execPath, [mainGuiPath], {
-      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore"
+      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore",
+      env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" }
     });
     child.unref();
     mainState = await waitForMainGui();
@@ -514,11 +516,13 @@ async function launchWindow() {
   await runPowerShellFile(hostSetupPath, ["-Root", webView2Root]);
   await runPowerShellFile(fontSetupPath, ["-Root", fontRoot]);
   const url = `http://127.0.0.1:${setupPort}/`;
-  windowHost = spawn("powershell.exe", [
+  const hostArgs = [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-File", hostScriptPath,
     "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profileDir, "-WindowStatePath", windowStatePath,
     "-Title", "DevRelay Setup", "-SetupMode", "-InitialWidth", "760", "-InitialHeight", "620", "-MinimumWidth", "560", "-MinimumHeight", "480"
-  ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+  ];
+  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", mainWindowStatePath);
+  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
   windowHost.once("exit", () => { windowHost = null; if (!shuttingDown) void shutdown(); });
   windowHost.once("error", () => { if (!shuttingDown) void shutdown(); });
 }

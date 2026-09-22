@@ -12,6 +12,7 @@ const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const windowStatePath = path.join(stateDir, "window-state.json");
+const setupWindowStatePath = path.join(stateDir, "setup-window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
@@ -432,7 +433,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: "Stop DevRelay before changing connection setup." });
       }
       if (!setupProcess) {
-        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore", env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" } });
         setupProcess.once("error", (error) => { pushLog(pluginLogs, `[GUI] Setup window failed: ${error.message}`, "error"); setupProcess = null; });
         setupProcess.once("exit", async () => {
           setupProcess = null;
@@ -494,10 +495,12 @@ async function launchWindow() {
   const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
   lastHeartbeatAt = 0;
-  windowHost = spawn("powershell.exe", [
+  const hostArgs = [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta",
     "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile, "-WindowStatePath", windowStatePath
-  ], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+  ];
+  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", setupWindowStatePath);
+  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
   windowHost.once("exit", () => {
     windowHost = null;
     if (!shuttingDown) void shutdown("GUI window closed");
