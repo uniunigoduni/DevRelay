@@ -153,8 +153,14 @@ async function startMainGuiForRegistration() {
     mainState = await readMainGuiState();
     if (mainState?.lastError) throw new Error(mainState.lastError);
     if (mainState?.running) {
-      if (mainState.connection?.kind !== "https") return mainState;
-      if (/^https:\/\//i.test(mainState.publicUrl || "")) break;
+      if (mainState.connection?.kind !== "https") {
+        registrationRuntime = mainState;
+        return mainState;
+      }
+      if (/^https:\/\//i.test(mainState.publicUrl || "")) {
+        registrationRuntime = mainState;
+        break;
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -319,9 +325,11 @@ async function activatePreparedSetup() {
   const previousSetup = currentSetup;
   busyMessage = "Opening the DevRelay main window and starting the server...";
   currentSetup = await saveSetupState(internalRoot, { completed: true, connection: draftConnection });
+  registrationRuntime = null;
   try {
     registrationRuntime = await startMainGuiForRegistration();
   } catch (error) {
+    registrationRuntime = null;
     currentSetup = await saveSetupState(internalRoot, previousSetup);
     throw error;
   }
@@ -470,16 +478,6 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/action") {
       const body = await readJson(req); const result = await handleAction(body); return sendJson(res, 200, { ...result, state: await apiState() });
-    }
-    if (req.method === "POST" && url.pathname === "/api/finish") {
-      if (!draftConnection || !draftReady) throw new Error("Choose and prepare a connection before finishing.");
-      if (draftConnection.kind === "https" && draftConnection.provider !== "cloudflare" && !draftConnection.publicUrl) throw new Error("Prepare the HTTPS connection before finishing.");
-      if (draftConnection.kind === "https" && draftConnection.provider === "cloudflare" && draftConnection.variant === "named" && !draftConnection.publicUrl) throw new Error("Prepare the Cloudflare hostname before finishing.");
-      currentSetup = await saveSetupState(internalRoot, { completed: true, connection: draftConnection });
-      await commitConnectionBackup();
-      sendJson(res, 200, { ok: true, setup: currentSetup });
-      setTimeout(() => { void shutdown(); }, 450).unref();
-      return;
     }
     if (req.method === "POST" && url.pathname === "/api/reset") {
       await withBusy("Resetting DevRelay connection settings...", async () => { await runSetupAction("ResetLocalConnection"); });

@@ -265,6 +265,19 @@ function Resource-Brush([string]$Name, [string]$Color) { $window.Resources[$Name
 $script:lastState = $null
 $script:busy = $false
 $script:theme = ""
+$script:setupRuntimeVisible = $false
+
+function Show-DevRelayWindowForeground {
+  try {
+    if ($window.WindowState -eq [Windows.WindowState]::Minimized) {
+      [System.Windows.SystemCommands]::RestoreWindow($window)
+    }
+    $window.Topmost = $true
+    [void]$window.Activate()
+    [void]$window.Focus()
+    $window.Topmost = $false
+  } catch {}
+}
 
 function Apply-Theme([string]$Theme) {
   if ($Theme -eq $script:theme) { return }
@@ -313,6 +326,11 @@ function Refresh-State {
     $state = Invoke-RestMethod -Uri "$origin/api/state" -Method Get -TimeoutSec 1
     $script:lastState = $state
     Apply-Theme ([string]$state.theme)
+    if ($SetupMode) {
+      $hasRegistrationRuntime = ($state.PSObject.Properties.Name -contains "registrationRuntime") -and ($null -ne $state.registrationRuntime)
+      if ($hasRegistrationRuntime -and -not $script:setupRuntimeVisible) { Show-DevRelayWindowForeground }
+      $script:setupRuntimeVisible = $hasRegistrationRuntime
+    }
     $active = [bool]($state.running -or $state.starting)
     $powerButton.Content = if ($active) { "STOP" } else { "START" }
     $powerButton.Background = Brush $(if ($active) { "#D92D20" } else { "#B42318" })
@@ -414,12 +432,7 @@ $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(500)
 $timer.Add_Tick({ Refresh-State })
 $window.Add_ContentRendered({
-  try {
-    $window.Topmost = $true
-    [void]$window.Activate()
-    [void]$window.Focus()
-    $window.Topmost = $false
-  } catch {}
+  Show-DevRelayWindowForeground
   Save-WindowSize
   Refresh-State
   $timer.Start()

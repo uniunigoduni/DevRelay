@@ -12,7 +12,6 @@ const openApprovalButton = $("#openApprovalButton");
 const abortSetupButton = $("#abortSetupButton");
 const backButton = $("#backButton");
 const cancelButton = $("#cancelButton");
-const finishButton = $("#finishButton");
 
 let state = null;
 let page = "choose";
@@ -387,8 +386,6 @@ function renderChrome() {
   }
   backButton.hidden = page === "choose" || page === "guide";
   cancelButton.textContent = page === "guide" ? "Close" : "Cancel";
-  finishButton.hidden = !(page === "guide" && state?.draftReady);
-  finishButton.disabled = locked;
   cancelButton.disabled = locked;
   backButton.disabled = locked;
   content.inert = Boolean(locked);
@@ -432,10 +429,6 @@ backButton.addEventListener("click", goBack);
 cancelButton.addEventListener("click", async () => {
   cancelButton.disabled = true;
   try { await api("/api/cancel", { method: "POST", body: "{}" }); } catch {}
-});
-finishButton.addEventListener("click", async () => {
-  const result = await perform("/api/finish", { method: "POST", body: "{}" });
-  if (result) finishButton.textContent = "Saved";
 });
 window.addEventListener("pagehide", () => { navigator.sendBeacon("/api/window-close", ""); });
 
