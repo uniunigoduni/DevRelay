@@ -174,10 +174,11 @@ try {
   "TailscaleLogin" {
     $exe = Get-DevRelayTailscaleExe
     if (-not $exe) { throw "Tailscale is not installed." }
-    Invoke-DevRelayExternal $exe @("login") | Out-Null
+    $login = Invoke-DevRelayStreamingExternal $exe @("login", "--timeout=10m")
+    if ($login.Code -ne 0) { throw "Tailscale sign-in did not complete. Use Sign in again and finish the browser approval." }
     $status = Get-TailscaleStatus $exe
     $dnsName = Get-TailscaleDnsName $status
-    if (-not $dnsName) { throw "Tailscale login completed but no tailnet DNS name is available." }
+    if (-not $dnsName) { throw "Tailscale sign-in finished but the device is not connected yet. Check the Tailscale client, then check status again." }
     Write-JsonResult ([ordered]@{ ok = $true; dnsName = $dnsName; publicUrl = "https://$dnsName/mcp" })
     break
   }
@@ -230,8 +231,9 @@ try {
       Write-JsonResult ([ordered]@{ ok = $true; alreadySignedIn = $true })
       break
     }
-    Invoke-DevRelayExternal $exe @("tunnel", "login") | Out-Null
-    if (-not (Test-Path -LiteralPath $certPath)) { throw "Cloudflare sign-in completed but cert.pem was not found." }
+    $login = Invoke-DevRelayStreamingExternal $exe @("tunnel", "login")
+    if ($login.Code -ne 0) { throw "Cloudflare sign-in did not complete. Use Sign in again and finish the browser approval." }
+    if (-not (Test-Path -LiteralPath $certPath)) { throw "Cloudflare sign-in finished but cert.pem was not created. Check the browser result, then try Sign in again." }
     Write-JsonResult ([ordered]@{ ok = $true; alreadySignedIn = $false })
     break
   }

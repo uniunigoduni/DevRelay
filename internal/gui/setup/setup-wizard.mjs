@@ -11,7 +11,7 @@ import {
   resetSetupState,
   saveSetupState
 } from "./setup-state.mjs";
-import { extractTailscaleApprovalUrl, tailscaleApprovalMessage } from "./tailscale-setup.mjs";
+import { extractCloudflareApprovalUrl, extractTailscaleApprovalUrl, isTrustedSetupApprovalUrl } from "./tailscale-setup.mjs";
 
 const setupDir = path.dirname(fileURLToPath(import.meta.url));
 const guiDir = path.resolve(setupDir, "..");
@@ -35,6 +35,8 @@ let draftConnection = currentSetup.connection ? structuredClone(currentSetup.con
 let draftReady = currentSetup.completed === true && draftConnection !== null;
 let busy = false;
 let busyMessage = "";
+let busyNeedsUser = false;
+let abortRequested = false;
 let lastError = null;
 let windowHost = null;
 let shuttingDown = false;
@@ -98,12 +100,9 @@ function execFilePromise(file, args, options = {}) {
   });
 }
 
-async function openTailscaleApproval(url) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:" || parsed.hostname !== "login.tailscale.com") {
-    throw new Error("Refused an untrusted Tailscale approval URL.");
-  }
-  await execFilePromise("rundll32.exe", ["url.dll,FileProtocolHandler", parsed.href]);
+async function openSetupApproval(url) {
+  if (!isTrustedSetupApprovalUrl(url)) throw new Error("Refused an untrusted setup approval URL.");
+  await execFilePromise("rundll32.exe", ["url.dll,FileProtocolHandler", new URL(url).href]);
 }
 
 async function runSetupAction(action, input = undefined, options = {}) {
@@ -142,6 +141,7 @@ async function runSetupAction(action, input = undefined, options = {}) {
     });
     child.once("exit", (code) => {
       void finish().then(() => {
+        if (abortRequested) return reject(new Error("Setup operation cancelled."));
         if (timedOut) return reject(new Error(`Setup action ${action} timed out.`));
         if (code !== 0) return reject(new Error((stderr || stdout || `Setup action ${action} failed with code ${code}`).trim()));
         const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
@@ -210,6 +210,7 @@ async function apiState() {
     providerStatus: await refreshProviderStatus(),
     busy,
     busyMessage,
+    busyNeedsUser,
     approvalUrl,
     error: lastError
   };
@@ -235,28 +236,41 @@ async function serveStatic(req, res, url) {
   } catch { res.writeHead(404).end(); }
 }
 
-async function withBusy(message, fn) {
+async function withBusy(message, fn, { needsUser = false } = {}) {
   if (busy) throw new Error("Another setup operation is already running.");
   busy = true;
   busyMessage = message;
+  busyNeedsUser = needsUser;
+  abortRequested = false;
   approvalUrl = null;
   lastError = null;
   try { return await fn(); }
   catch (error) { lastError = error.message; throw error; }
-  finally { busy = false; busyMessage = ""; approvalUrl = null; }
+  finally { busy = false; busyMessage = ""; busyNeedsUser = false; abortRequested = false; approvalUrl = null; }
 }
 
 async function handleAction(body) {
   const action = body.action;
-  if (action === "install-tailscale") return await withBusy("Installing Tailscale...", async () => {
-    const result = await runSetupAction("InstallTailscale"); await refreshProviderStatus(true); return result;
-  });
-  if (action === "tailscale-login") return await withBusy("Waiting for Tailscale sign-in...", async () => {
-    const result = await runSetupAction("TailscaleLogin"); await refreshProviderStatus(true); return result;
-  });
+  if (action === "install-tailscale") return await withBusy(
+    "Complete the Tailscale installer window. DevRelay will continue automatically when installation finishes.",
+    async () => { const result = await runSetupAction("InstallTailscale"); await refreshProviderStatus(true); return result; },
+    { needsUser: true }
+  );
+  if (action === "tailscale-login") return await withBusy(
+    "Complete Tailscale sign-in in your browser. DevRelay will continue automatically after sign-in.",
+    async () => {
+      let observed = "";
+      const result = await runSetupAction("TailscaleLogin", undefined, { timeoutMs: 10 * 60 * 1000, onOutput(chunk) {
+        observed = (observed + chunk).slice(-16_384);
+        const found = extractTailscaleApprovalUrl(observed);
+        if (found) approvalUrl = found;
+      }});
+      await refreshProviderStatus(true); return result;
+    },
+    { needsUser: true }
+  );
   if (action === "tailscale-prepare") return await withBusy("Enabling and validating Tailscale Funnel...", async () => {
     let observed = "";
-    let opened = false;
     const result = await runSetupAction("PrepareTailscale", undefined, {
       timeoutMs: 5 * 60 * 1000,
       onOutput(chunk) {
@@ -264,11 +278,8 @@ async function handleAction(body) {
         const found = extractTailscaleApprovalUrl(observed);
         if (!found) return;
         approvalUrl = found;
-        busyMessage = tailscaleApprovalMessage(found);
-        if (!opened) {
-          opened = true;
-          void openTailscaleApproval(found).catch(() => {});
-        }
+        busyNeedsUser = true;
+        busyMessage = "Approve Tailscale Funnel in your browser. DevRelay will continue automatically after approval.";
       }
     });
     draftConnection = { kind: "https", provider: "tailscale", publicUrl: result.publicUrl };
@@ -278,9 +289,19 @@ async function handleAction(body) {
   if (action === "cloudflare-install") return await withBusy("Preparing cloudflared...", async () => {
     const result = await runSetupAction("EnsureCloudflared"); await refreshProviderStatus(true); return result;
   });
-  if (action === "cloudflare-login") return await withBusy("Waiting for Cloudflare sign-in...", async () => {
-    const result = await runSetupAction("CloudflareLogin"); await refreshProviderStatus(true); return result;
-  });
+  if (action === "cloudflare-login") return await withBusy(
+    "Complete Cloudflare sign-in in your browser. DevRelay will continue automatically after approval.",
+    async () => {
+      let observed = "";
+      const result = await runSetupAction("CloudflareLogin", undefined, { timeoutMs: 10 * 60 * 1000, onOutput(chunk) {
+        observed = (observed + chunk).slice(-16_384);
+        const found = extractCloudflareApprovalUrl(observed);
+        if (found) approvalUrl = found;
+      }});
+      await refreshProviderStatus(true); return result;
+    },
+    { needsUser: true }
+  );
   if (action === "cloudflare-named") return await withBusy("Preparing Cloudflare hostname...", async () => {
     const result = await runSetupAction("ConfigureCloudflareNamed", { hostname: body.hostname, tunnelName: body.tunnelName || "devrelay" });
     draftConnection = { kind: "https", provider: "cloudflare", variant: "named", publicUrl: result.publicUrl };
@@ -328,10 +349,25 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && url.pathname === "/api/state") return sendJson(res, 200, await apiState());
     if (req.method === "GET" && url.pathname === "/api/progress") {
-      return sendJson(res, 200, { busy, busyMessage, approvalUrl, error: lastError });
+      return sendJson(res, 200, { busy, busyMessage, busyNeedsUser, approvalUrl, error: lastError });
     }
-    if (busy && req.method === "POST" && url.pathname !== "/api/window-close") {
+    if (busy && req.method === "POST" && !["/api/window-close", "/api/abort", "/api/open-approval"].includes(url.pathname)) {
       return sendJson(res, 409, { error: "Setup is busy." });
+    }
+    if (req.method === "POST" && url.pathname === "/api/abort") {
+      if (!busy) return sendJson(res, 200, { ok: true, busy: false });
+      abortRequested = true;
+      if (activeSetupChild?.pid) await taskkill(activeSetupChild.pid);
+      return sendJson(res, 202, { ok: true, busy: true });
+    }
+    if (req.method === "POST" && url.pathname === "/api/open-approval") {
+      if (!approvalUrl) throw new Error("No approval page is available yet.");
+      await openSetupApproval(approvalUrl);
+      return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && url.pathname === "/api/recheck") {
+      await refreshProviderStatus(true);
+      return sendJson(res, 200, { ok: true, state: await apiState() });
     }
     if (req.method === "POST" && url.pathname === "/api/select") {
       const body = await readJson(req);

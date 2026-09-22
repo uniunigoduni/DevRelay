@@ -22,8 +22,17 @@ function Get-DevRelayWindowsArchitecture {
 }
 
 function Invoke-DevRelayExternal([string]$FilePath, [string[]]$Arguments, [switch]$AllowFailure) {
-  $output = & $FilePath @Arguments 2>&1
-  $code = $LASTEXITCODE
+  $previousPreference = $ErrorActionPreference
+  try {
+    # Native CLIs often write progress or browser-login instructions to stderr.
+    # Windows PowerShell can promote that stderr to an ErrorRecord when the
+    # caller uses ErrorActionPreference=Stop, even when the process exits 0.
+    $ErrorActionPreference = "Continue"
+    $output = & $FilePath @Arguments 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
   if ($code -ne 0 -and -not $AllowFailure) {
     throw "$FilePath $($Arguments -join ' ') exited with code ${code}: $($output -join ' ')"
   }

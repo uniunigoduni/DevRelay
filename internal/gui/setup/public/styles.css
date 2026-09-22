@@ -26,6 +26,10 @@ h1 { margin: 5px 0 6px; font-size: 21px; line-height: 1.25; font-weight: 700; }
 .hero p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; max-width: 680px; }
 .status-pill { flex: 0 0 auto; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 10px; }
 .notice, .current-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); font-size: 10.5px; line-height: 1.5; }
+.busy-panel { padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--soft); font-size: 10px; line-height: 1.5; }
+.busy-panel strong { display: block; margin-bottom: 4px; font-size: 11px; }
+.busy-panel #busyDetail { color: var(--muted); }
+.busy-panel code { display: block; margin-top: 8px; padding: 8px; border: 1px dashed var(--line-strong); border-radius: 7px; background: #fff; color: var(--text); overflow-wrap: anywhere; }
 .notice.error { border-color: var(--danger); color: var(--danger); }
 .current-card { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; background: var(--soft); }
 .current-card .label { color: var(--muted); }

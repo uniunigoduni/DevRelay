@@ -17,6 +17,16 @@
     <section id="notice" class="notice" hidden></section>
     <section id="currentCard" class="current-card" hidden></section>
 
+    <section id="busyPanel" class="busy-panel" hidden>
+      <strong id="busyTitle">Working</strong>
+      <div id="busyDetail"></div>
+      <code id="busyApprovalUrl" hidden></code>
+      <div class="actions">
+        <button id="openApprovalButton" class="button secondary" type="button" hidden>Open approval page</button>
+        <button id="abortSetupButton" class="button secondary" type="button">Stop waiting</button>
+      </div>
+    </section>
+
     <nav id="breadcrumbs" class="breadcrumbs" aria-label="Setup path"></nav>
     <section id="content" class="content" aria-live="polite"></section>
 

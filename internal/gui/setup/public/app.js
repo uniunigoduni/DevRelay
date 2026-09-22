@@ -4,6 +4,12 @@ const breadcrumbs = $("#breadcrumbs");
 const currentCard = $("#currentCard");
 const notice = $("#notice");
 const busyBadge = $("#busyBadge");
+const busyPanel = $("#busyPanel");
+const busyTitle = $("#busyTitle");
+const busyDetail = $("#busyDetail");
+const busyApprovalUrl = $("#busyApprovalUrl");
+const openApprovalButton = $("#openApprovalButton");
+const abortSetupButton = $("#abortSetupButton");
 const backButton = $("#backButton");
 const cancelButton = $("#cancelButton");
 const finishButton = $("#finishButton");
@@ -216,21 +222,24 @@ function renderTailscale() {
   const ready = state?.draftReady && connectionChoice(state?.draft) === "tailscale";
   content.innerHTML = `
     <h2 class="section-title">Tailscale Funnel</h2>
+    <p class="section-copy">Install Tailscale, sign in in your browser, then prepare Funnel.</p>
     <div class="card">
       <div class="provider-status">
         ${providerLine("Client", ps.tailscaleInstalled ? "Installed" : "Not installed")}
-        ${providerLine("Sign-in", ps.tailscaleLoggedIn ? "Signed in" : "Not signed in")}
+        ${providerLine("Sign-in", ps.tailscaleLoggedIn ? "Signed in" : "Sign-in required")}
         ${providerLine("DNS name", ps.tailscaleDnsName || "-")}
       </div>
       <div class="actions">
         <button id="installTailscale" class="button secondary" type="button" ${ps.tailscaleInstalled ? "disabled" : ""}>Install Tailscale</button>
         <button id="loginTailscale" class="button secondary" type="button" ${!ps.tailscaleInstalled || ps.tailscaleLoggedIn ? "disabled" : ""}>Sign in</button>
+        <button id="refreshTailscale" class="button secondary" type="button">Check status</button>
         <button id="prepareTailscale" class="button primary" type="button" ${!ps.tailscaleLoggedIn ? "disabled" : ""}>Prepare</button>
       </div>
       ${ready ? `<div class="check-row"><span class="mark">OK</span><span>${escapeHtml(connectionEndpoint(state.draft))}</span></div>` : ""}
     </div>`;
   $("#installTailscale")?.addEventListener("click", async () => { if (await action("install-tailscale")) await refresh(); });
   $("#loginTailscale")?.addEventListener("click", async () => { if (await action("tailscale-login")) await refresh(); });
+  $("#refreshTailscale")?.addEventListener("click", async () => { if (await perform("/api/recheck", { method: "POST", body: "{}" })) render(); });
   $("#prepareTailscale")?.addEventListener("click", async () => { if (await action("tailscale-prepare")) setPage("guide"); });
 }
 
@@ -239,14 +248,16 @@ function renderCloudflareNamed() {
   const ready = state?.draftReady && connectionChoice(state?.draft) === "cloudflare-named";
   content.innerHTML = `
     <h2 class="section-title">Cloudflare custom hostname</h2>
+    <p class="section-copy">Sign in to Cloudflare in your browser before using a custom hostname.</p>
     <div class="card">
       <div class="provider-status">
         ${providerLine("cloudflared", ps.cloudflaredInstalled ? "Installed" : "Not installed")}
-        ${providerLine("Sign-in", ps.cloudflareLoggedIn ? "Signed in" : "Not signed in")}
+        ${providerLine("Sign-in", ps.cloudflareLoggedIn ? "Signed in" : "Sign-in required")}
       </div>
       <div class="actions">
         <button id="prepareCloudflared" class="button secondary" type="button" ${ps.cloudflaredInstalled ? "disabled" : ""}>Install cloudflared</button>
         <button id="loginCloudflare" class="button secondary" type="button" ${!ps.cloudflaredInstalled || ps.cloudflareLoggedIn ? "disabled" : ""}>Sign in</button>
+        <button id="refreshCloudflare" class="button secondary" type="button">Check status</button>
       </div>
       <label class="field">Hostname<input id="cfHostname" autocomplete="off" placeholder="devrelay.example.com"></label>
       <div class="actions"><button id="configureCloudflare" class="button primary" type="button" ${!ps.cloudflaredInstalled || !ps.cloudflareLoggedIn ? "disabled" : ""}>Use hostname</button></div>
@@ -254,6 +265,7 @@ function renderCloudflareNamed() {
     </div>`;
   $("#prepareCloudflared")?.addEventListener("click", async () => { if (await action("cloudflare-install")) await refresh(); });
   $("#loginCloudflare")?.addEventListener("click", async () => { if (await action("cloudflare-login")) await refresh(); });
+  $("#refreshCloudflare")?.addEventListener("click", async () => { if (await perform("/api/recheck", { method: "POST", body: "{}" })) render(); });
   $("#configureCloudflare")?.addEventListener("click", async () => {
     if (requestBusy || state?.busy) return;
     const hostname = $("#cfHostname").value.trim();
@@ -324,11 +336,8 @@ async function refreshOperationProgress() {
   try {
     const progress = await api("/api/progress");
     if (!requestBusy) return;
-    state = { ...(state || {}), busy: progress.busy, busyMessage: progress.busyMessage, approvalUrl: progress.approvalUrl };
+    state = { ...(state || {}), busy: progress.busy, busyMessage: progress.busyMessage, busyNeedsUser: progress.busyNeedsUser, approvalUrl: progress.approvalUrl };
     renderChrome();
-    if (progress.approvalUrl) {
-      setNotice(`Waiting for Tailscale approval in your browser. ${progress.approvalUrl}`);
-    }
   } catch {}
 }
 
@@ -362,7 +371,17 @@ function renderChrome() {
   renderBreadcrumbs();
   const locked = requestBusy || state?.busy;
   busyBadge.hidden = !locked;
-  busyBadge.textContent = state?.busyMessage || "Working...";
+  busyBadge.textContent = state?.busyNeedsUser ? "Action required" : "Working...";
+  busyPanel.hidden = !locked;
+  if (locked) {
+    busyTitle.textContent = state?.busyNeedsUser ? "Action required" : "Working";
+    busyDetail.textContent = state?.busyMessage || "Working...";
+    const approval = state?.approvalUrl || "";
+    busyApprovalUrl.hidden = !approval;
+    busyApprovalUrl.textContent = approval;
+    openApprovalButton.hidden = !approval;
+    abortSetupButton.disabled = false;
+  }
   backButton.hidden = page === "choose";
   finishButton.hidden = !(page === "guide" && state?.draftReady);
   finishButton.disabled = locked;
@@ -392,6 +411,18 @@ async function refresh(repaint = true) {
     if (repaint) render(); else renderChrome();
   } catch (error) { setNotice(error.message, true); }
 }
+
+openApprovalButton.addEventListener("click", async () => {
+  openApprovalButton.disabled = true;
+  try { await api("/api/open-approval", { method: "POST", body: "{}" }); }
+  catch (error) { setNotice(error.message, true); }
+  finally { openApprovalButton.disabled = false; }
+});
+abortSetupButton.addEventListener("click", async () => {
+  abortSetupButton.disabled = true;
+  try { await api("/api/abort", { method: "POST", body: "{}" }); }
+  catch (error) { setNotice(error.message, true); abortSetupButton.disabled = false; }
+});
 
 backButton.addEventListener("click", goBack);
 cancelButton.addEventListener("click", async () => {
