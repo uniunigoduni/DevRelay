@@ -151,7 +151,7 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
       <Button x:Name="CloseButton" Grid.Column="5" Style="{StaticResource WindowCloseButtonStyle}"
               Content="&#xE8BB;" ToolTip="Close"/>
     </Grid>
-    <wv2:WebView2 x:Name="WebView" Grid.Row="1" DefaultBackgroundColor="White" />
+    <wv2:WebView2 x:Name="WebView" Grid.Row="1" Margin="6,0,6,6" DefaultBackgroundColor="White" />
   </Grid>
 </Window>
 '@
