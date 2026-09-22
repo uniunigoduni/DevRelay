@@ -38,6 +38,18 @@ async function withOAuthServer(run: (base: string, oauth: DevRelayOAuthServer) =
   }
 }
 
+test("OAuth protected resource metadata supports the MCP resource path", async () => {
+  await withOAuthServer(async (base, oauth) => {
+    assert.equal(oauth.metadataUrl, `${ISSUER}/.well-known/oauth-protected-resource/mcp`);
+    for (const metadataPath of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
+      const response = await fetch(`${base}${metadataPath}`);
+      assert.equal(response.status, 200);
+      const metadata = await response.json() as { resource: string; authorization_servers: string[] };
+      assert.equal(metadata.resource, RESOURCE);
+      assert.deepEqual(metadata.authorization_servers, [ISSUER]);
+    }
+  });
+});
 test("OAuth DCR + PKCE + refresh flow", async () => {
   await withOAuthServer(async (base, oauth) => {
     const metadata = await fetch(`${base}/.well-known/oauth-authorization-server`).then((response) => response.json());

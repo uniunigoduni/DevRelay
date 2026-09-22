@@ -34,6 +34,78 @@ function Write-StateJson([string]$Path, $Value) {
   [IO.File]::WriteAllText($Path, $json + [Environment]::NewLine, [Text.Encoding]::UTF8)
 }
 
+function ConvertTo-DevRelayProcessArgument([string]$Value) {
+  if ($Value -notmatch '[\s"]') { return $Value }
+  $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
+  $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+  return '"' + $escaped + '"'
+}
+
+function Invoke-DevRelayStreamingExternal([string]$FilePath, [string[]]$Arguments) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $FilePath
+  $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-DevRelayProcessArgument ([string]$_) }) -join ' ')
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+  $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $psi
+  $stdoutText = New-Object Text.StringBuilder
+  $stderrText = New-Object Text.StringBuilder
+  try {
+    [void]$process.Start()
+    $stdoutBuffer = New-Object char[] 1024
+    $stderrBuffer = New-Object char[] 1024
+    $stdoutTask = $process.StandardOutput.ReadAsync($stdoutBuffer, 0, $stdoutBuffer.Length)
+    $stderrTask = $process.StandardError.ReadAsync($stderrBuffer, 0, $stderrBuffer.Length)
+    $stdoutDone = $false
+    $stderrDone = $false
+
+    while (-not $process.HasExited -or -not $stdoutDone -or -not $stderrDone) {
+      if (-not $stdoutDone -and $stdoutTask.IsCompleted) {
+        $count = $stdoutTask.Result
+        if ($count -eq 0) {
+          $stdoutDone = $true
+        } else {
+          $chunk = -join $stdoutBuffer[0..($count - 1)]
+          [void]$stdoutText.Append($chunk)
+          [Console]::Out.Write($chunk)
+          [Console]::Out.Flush()
+          $stdoutBuffer = New-Object char[] 1024
+          $stdoutTask = $process.StandardOutput.ReadAsync($stdoutBuffer, 0, $stdoutBuffer.Length)
+        }
+      }
+      if (-not $stderrDone -and $stderrTask.IsCompleted) {
+        $count = $stderrTask.Result
+        if ($count -eq 0) {
+          $stderrDone = $true
+        } else {
+          $chunk = -join $stderrBuffer[0..($count - 1)]
+          [void]$stderrText.Append($chunk)
+          [Console]::Out.Write($chunk)
+          [Console]::Out.Flush()
+          $stderrBuffer = New-Object char[] 1024
+          $stderrTask = $process.StandardError.ReadAsync($stderrBuffer, 0, $stderrBuffer.Length)
+        }
+      }
+      if (-not $process.HasExited) { Start-Sleep -Milliseconds 50 }
+      $process.Refresh()
+    }
+
+    $process.WaitForExit()
+    $combined = $stdoutText.ToString() + [Environment]::NewLine + $stderrText.ToString()
+    $output = @(($combined -split "`r?`n") | Where-Object { $_ -ne "" })
+    return [pscustomobject]@{ Code = [int]$process.ExitCode; Output = $output }
+  } finally {
+    if (-not $process.HasExited) { try { $process.Kill() } catch {} }
+    $process.Dispose()
+  }
+}
+
 function Get-TailscaleStatus([string]$Exe) {
   $result = Invoke-DevRelayExternal $Exe @("status", "--json") -AllowFailure
   if ($result.Code -ne 0) { return $null }
@@ -109,13 +181,26 @@ switch ($Action) {
     if (-not $dnsName) { throw "Sign in to Tailscale before enabling Funnel." }
     $target = "127.0.0.1:$Port"
     try {
-      Invoke-DevRelayExternal $exe @("funnel", "--bg", "--yes", "--https=443", $target) | Out-Null
-      $funnelStatus = Invoke-DevRelayExternal $exe @("funnel", "status", "--json") -AllowFailure
+      $funnelResult = Invoke-DevRelayStreamingExternal $exe @("funnel", "--bg", "--yes", "--https=443", $target)
+      if ($funnelResult.Code -ne 0) {
+        throw "$exe funnel exited with code $($funnelResult.Code): $($funnelResult.Output -join ' ')"
+      }
+
+      $ready = $false
+      for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $funnelStatus = Invoke-DevRelayExternal $exe @("funnel", "status", "--json") -AllowFailure
+        if ($funnelStatus.Code -eq 0) {
+          $joined = ($funnelStatus.Output -join [Environment]::NewLine).Trim()
+          if ($joined -and $joined -ne "{}" -and $joined -ne "null") { $ready = $true; break }
+        }
+        Start-Sleep -Milliseconds 500
+      }
+      if (-not $ready) { throw "Tailscale Funnel command completed but no Funnel configuration became active." }
       Write-JsonResult ([ordered]@{
         ok = $true
         dnsName = $dnsName
         publicUrl = "https://$dnsName/mcp"
-        funnelStatusAvailable = $funnelStatus.Code -eq 0
+        funnelStatusAvailable = $true
       })
     } finally {
       Invoke-DevRelayExternal $exe @("funnel", "reset") -AllowFailure | Out-Null

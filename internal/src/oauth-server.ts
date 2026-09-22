@@ -182,7 +182,9 @@ export class DevRelayOAuthServer {
     this.clientsPath = path.join(this.oauthDir, "clients.json");
     this.refreshPath = path.join(this.oauthDir, "refresh-tokens.json");
     this.signingKeyPath = path.join(this.oauthDir, "signing-key.txt");
-    this.metadataUrl = `${this.issuer}/.well-known/oauth-protected-resource`;
+    const resourceUrl = new URL(this.resource);
+    const resourcePath = resourceUrl.pathname === "/" ? "" : resourceUrl.pathname.replace(/\/$/, "");
+    this.metadataUrl = `${this.issuer}/.well-known/oauth-protected-resource${resourcePath}`;
   }
 
   static async create(options: OAuthServerOptions): Promise<DevRelayOAuthServer> {
@@ -368,7 +370,8 @@ export class DevRelayOAuthServer {
       }));
   }
   async handleRoute(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
-    if (request.method === "GET" && url.pathname === "/.well-known/oauth-protected-resource") {
+    const protectedResourceMetadataPath = new URL(this.metadataUrl).pathname;
+    if (request.method === "GET" && (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === protectedResourceMetadataPath)) {
       json(response, 200, this.protectedResourceMetadata());
       return true;
     }

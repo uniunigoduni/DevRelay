@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
+import { hostHeaderValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
 import { createDevRelayServer } from "./mcp-server.js";
 import { DevRelayOAuthServer } from "./oauth-server.js";
 import { ProcessManager } from "./process-manager.js";
@@ -28,10 +28,12 @@ async function createOAuthFromEnvironment(): Promise<DevRelayOAuthServer | undef
 export async function serveHttp(manager: ProcessManager, identity: DeviceIdentity, host: string, port: number): Promise<HttpServerHandle> {
   const handler = createMcpHandler(() => createDevRelayServer(manager, identity));
   const nodeHandler = toNodeHandler(handler);
-  const validateHost = localhostHostValidation();
   const validateOrigin = localhostOriginValidation();
   const localOnly = isLoopback(host);
   const oauth = await createOAuthFromEnvironment();
+  const allowedHosts = ["localhost", "127.0.0.1", "[::1]"];
+  if (oauth) allowedHosts.push(new URL(oauth.issuer).hostname);
+  const validateHost = hostHeaderValidation(allowedHosts);
 
   const httpServer = createHttpServer((request, response) => {
     void (async () => {

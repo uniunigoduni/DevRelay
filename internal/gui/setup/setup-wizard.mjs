@@ -12,6 +12,7 @@ import {
   resetSetupState,
   saveSetupState
 } from "./setup-state.mjs";
+import { extractTailscaleApprovalUrl, tailscaleApprovalMessage } from "./tailscale-setup.mjs";
 
 const setupDir = path.dirname(fileURLToPath(import.meta.url));
 const guiDir = path.resolve(setupDir, "..");
@@ -40,6 +41,8 @@ let windowHost = null;
 let shuttingDown = false;
 let providerStatus = null;
 let providerStatusAt = 0;
+let activeSetupChild = null;
+let approvalUrl = null;
 let issueStates = SECURE_TUNNEL_ISSUES.map((issue) => ({ ...issue, state: "unknown" }));
 
 const backupRoot = path.join(stateDir, "setup-backups", randomUUID());
@@ -97,21 +100,42 @@ function execFilePromise(file, args, options = {}) {
   });
 }
 
-async function runSetupAction(action, input = undefined) {
+async function openTailscaleApproval(url) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" || parsed.hostname !== "login.tailscale.com") {
+    throw new Error("Refused an untrusted Tailscale approval URL.");
+  }
+  await execFilePromise("rundll32.exe", ["url.dll,FileProtocolHandler", parsed.href]);
+}
+
+async function runSetupAction(action, input = undefined, options = {}) {
   const port = await loadPort();
   return await new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", [
       "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
       "-File", setupActionsPath, "-Action", action, "-Port", String(port)
     ], { cwd: internalRoot, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    activeSetupChild = child;
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    const timer = options.timeoutMs ? setTimeout(() => {
+      timedOut = true;
+      if (child.pid) void taskkill(child.pid);
+    }, options.timeoutMs) : null;
+    timer?.unref();
+    const finish = () => {
+      if (timer) clearTimeout(timer);
+      if (activeSetupChild === child) activeSetupChild = null;
+    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", reject);
+    child.stdout.on("data", (chunk) => { stdout += chunk; options.onOutput?.(String(chunk)); });
+    child.stderr.on("data", (chunk) => { stderr += chunk; options.onOutput?.(String(chunk)); });
+    child.once("error", (error) => { finish(); reject(error); });
     child.once("exit", (code) => {
+      finish();
+      if (timedOut) return reject(new Error(`Setup action ${action} timed out.`));
       if (code !== 0) return reject(new Error((stderr || stdout || `Setup action ${action} failed with code ${code}`).trim()));
       const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
       const last = lines.at(-1) || "{}";
@@ -203,6 +227,7 @@ async function apiState() {
     issues: issueStates,
     busy,
     busyMessage,
+    approvalUrl,
     error: lastError
   };
 }
@@ -231,10 +256,11 @@ async function withBusy(message, fn) {
   if (busy) throw new Error("Another setup operation is already running.");
   busy = true;
   busyMessage = message;
+  approvalUrl = null;
   lastError = null;
   try { return await fn(); }
   catch (error) { lastError = error.message; throw error; }
-  finally { busy = false; busyMessage = ""; }
+  finally { busy = false; busyMessage = ""; approvalUrl = null; }
 }
 
 async function handleAction(body) {
@@ -246,7 +272,22 @@ async function handleAction(body) {
     const result = await runSetupAction("TailscaleLogin"); await refreshProviderStatus(true); return result;
   });
   if (action === "tailscale-prepare") return await withBusy("Enabling and validating Tailscale Funnel...", async () => {
-    const result = await runSetupAction("PrepareTailscale");
+    let observed = "";
+    let opened = false;
+    const result = await runSetupAction("PrepareTailscale", undefined, {
+      timeoutMs: 5 * 60 * 1000,
+      onOutput(chunk) {
+        observed = (observed + chunk).slice(-16_384);
+        const found = extractTailscaleApprovalUrl(observed);
+        if (!found) return;
+        approvalUrl = found;
+        busyMessage = tailscaleApprovalMessage(found);
+        if (!opened) {
+          opened = true;
+          void openTailscaleApproval(found).catch(() => {});
+        }
+      }
+    });
     draftConnection = { kind: "https", provider: "tailscale", publicUrl: result.publicUrl };
     draftReady = true;
     return result;
@@ -287,6 +328,8 @@ function taskkill(pid) {
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (activeSetupChild?.pid) await taskkill(activeSetupChild.pid);
+  activeSetupChild = null;
   await restoreConnectionBackup();
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
@@ -301,6 +344,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", expectedOrigin);
   try {
     if (req.method === "GET" && url.pathname === "/api/state") return sendJson(res, 200, await apiState());
+    if (req.method === "GET" && url.pathname === "/api/progress") {
+      return sendJson(res, 200, { busy, busyMessage, approvalUrl, error: lastError });
+    }
     if (req.method === "POST" && url.pathname === "/api/select") {
       const body = await readJson(req);
       const choice = body.choice;

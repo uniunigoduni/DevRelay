@@ -154,6 +154,17 @@ async function saveSettings() {
   await writeFile(settingsPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 }
 
+async function refreshSetupFromDisk() {
+  const latest = await ensureSetupState(internalRoot);
+  const changed = JSON.stringify(latest) !== JSON.stringify(setup);
+  if (!changed) return false;
+  setup = latest;
+  if (!runtime && !state.starting && !state.running && !state.stopping) {
+    publicUrl = connectionPublicUrl(setup.connection);
+  }
+  return true;
+}
+
 function snapshot() {
   return {
     ...state,
@@ -361,7 +372,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/") return void await serveStatic(res, "index.html", "text/html; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/app.js") return void await serveStatic(res, "app.js", "text/javascript; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/styles.css") return void await serveStatic(res, "styles.css", "text/css; charset=utf-8");
-    if (req.method === "GET" && url.pathname === "/api/state") return sendJson(res, 200, snapshot());
+    if (req.method === "GET" && url.pathname === "/api/state") {
+      await refreshSetupFromDisk();
+      return sendJson(res, 200, snapshot());
+    }
 
     if (req.method === "POST" && url.pathname === "/api/start") {
       await startRuntime();

@@ -342,11 +342,25 @@ async function selectChoice(choice) {
   } catch (error) { setNotice(error.message, true); }
 }
 
+async function refreshOperationProgress() {
+  if (!requestBusy) return;
+  try {
+    const progress = await api("/api/progress");
+    if (!requestBusy) return;
+    state = { ...(state || {}), busy: progress.busy, busyMessage: progress.busyMessage, approvalUrl: progress.approvalUrl };
+    renderChrome();
+    if (progress.approvalUrl) {
+      setNotice(`Waiting for Tailscale approval in your browser. ${progress.approvalUrl}`);
+    }
+  } catch {}
+}
+
 async function perform(path, options, successMessage = "") {
   if (requestBusy) return null;
   requestBusy = true;
   renderChrome();
   setNotice();
+  const progressTimer = setInterval(() => { void refreshOperationProgress(); }, 400);
   try {
     const result = await api(path, options);
     if (result.state) state = result.state;
@@ -356,6 +370,7 @@ async function perform(path, options, successMessage = "") {
     setNotice(error.message, true);
     return null;
   } finally {
+    clearInterval(progressTimer);
     requestBusy = false;
     await refresh(false);
   }
