@@ -41,13 +41,23 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 
 ## WindowsではDevRelay.cmdを使う
 
-通常はプロジェクト直下の `DevRelay.cmd` をダブルクリックします。起動ファイル側では接続モードを選びません。設定パネルの `Mode` が唯一の設定元で、初回は `HTTPS Named Tunnel`、以後は保存した `HTTPS Named Tunnel` / `OpenAI Secure Tunnel` の選択をそのまま復元します。
+通常はプロジェクト直下の `DevRelay.cmd` をダブルクリックします。起動前に最新のpublished GitHub Releaseを確認し、その後にローカルの接続セットアップ状態を確認します。
 
-起動前にGitHubの最新published Releaseだけを確認し、公式`origin`・cleanなGit worktree・fast-forward可能という条件が揃う場合だけ自動更新します。通常の`main`へのpush、prerelease、fork、dirty checkout、releaseより先行している開発checkoutは自動更新しません。Git checkoutではないZIP展開版も自動更新対象外です。
+新規インストールでは通常GUIより先に、ライトテーマの別ウィンドウ **DevRelay Setup** が開きます。接続方式はこのWizardが管理し、メインGUIのSettingsには従来の `Mode` 選択はありません。
 
-HTTPSモードでChatGPTなどがOAuth認可を開始すると、設定パネルが自動で開いて接続元・リダイレクト先・scopeを表示します。ローカルGUIでApproveした場合だけ認可コードが発行され、Denyなら拒否されます。公開ブラウザ画面だけでは承認できません。
+接続方式は次の構成です。
 
-GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log` だけに絞り、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Monoで、未導入PCではランチャーがGoogle Fonts公式版を現在ユーザーへ導入します。テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。各ウィンドウ起動のログは `internal/.devrelay/logs/` に保存し、直近3回だけ保持します。GUIを閉じるとDevRelayとトンネルも停止します。詳細は [launcher.md](launcher.md) を参照してください。
+- **OpenAI Secure Tunnel**: 構成としては推奨ですが、ChatGPT/tunnel-client側の既知問題があるため現在はExperimental表示です。Wizardはopenai/tunnel-clientの #71、#57、#41 を正式なissue名と番号で表示し、GitHubへ接続できる場合はOPEN/CLOSED状態も非同期で確認します。
+- **HTTPS / Tailscale Funnel**: HTTPSでは推奨です。独自ドメインは不要で、必要ならWizardから公式Windows版Tailscaleのインストール、通常のブラウザログイン、Funnel準備へ進めます。
+- **HTTPS / Cloudflare Named Tunnel**: 固定hostnameを使えますが、CloudflareアカウントとCloudflare管理下のドメインが必要です。Dashboardのブラウザ自動操作はせず、公式 `cloudflared` CLIのログイン・Tunnel作成・DNS routeを使います。
+- **HTTPS / Cloudflare Quick Tunnel**: アカウントもドメインも不要ですが、`trycloudflare.com` のURLは一時的で、Tunnel再作成後に変わることがあります。
+
+Wizardの最後にはChatGPTへの登録手順も表示します。OpenAI Secure TunnelではTunnel接続 + MCP側 `No authentication`、HTTPSでは公開 `/mcp` URL + `OAuth` を案内します。HTTPSのOAuth要求は通常のDevRelayウィンドウでApprove/Denyします。
+
+一度セットアップした後は、メインSettingsの `Connection Setup...` から同じ別ウィンドウを再度開けます。新しい接続は **Finish setup** まで現在の `setup.json` を置き換えません。Cancel/ウィンドウを閉じた場合はWizard中に変更したローカル接続ファイルを復元します。Advanced ResetはDevRelay側の接続設定だけを消し、Tailscaleのアンインストールやprovider側のremote resource削除は自動では行いません。
+
+GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log`、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Mono、テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。GUIを閉じるとDevRelayと現在の接続processも停止します。詳細は [launcher.md](launcher.md) を参照してください。
+
 
 ## 複数デバイス
 

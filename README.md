@@ -12,7 +12,7 @@ DevRelay is currently **v0.2.0**. The project targets development use on Windows
 
 - MCP over stdio.
 - MCP over Streamable HTTP.
-- OAuth 2.1 Authorization Code + PKCE with DCR for public HTTPS Named Tunnel mode.
+- OAuth 2.1 Authorization Code + PKCE with DCR for public HTTPS connections (Tailscale Funnel or Cloudflare).
 - Arbitrary one-shot command execution.
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
@@ -160,10 +160,21 @@ An update is applied only when the checkout uses the official DevRelay `origin`,
 
 ## Windows double-click launcher
 
-For normal Windows use, double-click `DevRelay.cmd`. It opens the local WPF/WebView2 control GUI without a terminal window. The connection mode is not chosen by the launcher; the saved `Mode` in Settings is the single source of truth. The first launch defaults to `HTTPS Named Tunnel`, and later launches restore the saved choice between HTTPS Named Tunnel and OpenAI Secure MCP Tunnel.
+For normal Windows use, double-click `DevRelay.cmd`. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup.
 
-The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480×480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Connection and device settings can be edited while stopped; an incoming HTTPS OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its active tunnel.
+A fresh install opens a separate light-theme **DevRelay Setup** window before the main GUI. Connection setup is chosen there rather than through a `Mode` field in the main window:
 
-Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, caches, logs, tunnel state, window state, and credentials remain under `.devrelay` and are excluded from Git.
+- **OpenAI Secure Tunnel** - preferred architecture, currently marked Experimental while upstream ChatGPT/tunnel-client issues #71, #57, and #41 remain relevant. The wizard shows their exact titles and refreshes OPEN/CLOSED state when GitHub is reachable.
+- **HTTPS / Tailscale Funnel** - recommended HTTPS provider. It does not require a custom domain; the wizard can install the official Windows Tailscale client, use normal browser sign-in, and prepare a stable `*.ts.net` endpoint.
+- **HTTPS / Cloudflare Named Tunnel** - stable hostname for users with a Cloudflare-managed domain. The wizard uses the official `cloudflared` login/create/DNS CLI flow.
+- **HTTPS / Cloudflare Quick Tunnel** - no account or domain required, but the `trycloudflare.com` URL is temporary and can change after restart.
+
+The wizard also shows the ChatGPT registration steps. Secure Tunnel uses a Tunnel connection with no MCP authentication; HTTPS endpoints use DevRelay OAuth and require the local DevRelay window to approve the OAuth request. Provider-specific live interoperability should be validated in the target account/workspace because those external services can change independently of DevRelay.
+
+After setup, the main GUI shows the current Connection and endpoint. `Connection Setup...` reopens the separate wizard while DevRelay is stopped. The current connection is not replaced until setup finishes; Cancel restores the previous local connection files. Advanced Reset removes DevRelay's local connection configuration but does not uninstall Tailscale or automatically delete provider-side tunnel resources.
+
+The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480x480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped; an incoming HTTPS OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its active connection process.
+
+Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.

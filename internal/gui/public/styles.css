@@ -183,3 +183,10 @@ body.dragging-scroll-thumb { cursor: grabbing; user-select: none; }
 
 .device-default { margin-top: 7px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .device-default code { color: var(--text); font: inherit; }
+
+.connection-setting { margin-top: 14px; padding: 11px 0 2px; border-top: 1px solid var(--line); }
+.connection-setting > span { display: block; color: var(--muted); font-size: 10px; font-weight: 600; margin-bottom: 5px; }
+.connection-setting > strong { display: block; color: var(--text); font-size: 10.5px; line-height: 1.45; margin-bottom: 8px; overflow-wrap: anywhere; }
+.secondary-button { width: 100%; min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 10.5px; font-weight: 650; }
+.secondary-button:hover { background: var(--panel2); }
+.secondary-button:disabled { opacity: .36; cursor: default; }

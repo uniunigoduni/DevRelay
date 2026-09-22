@@ -2,56 +2,108 @@
 
 DevRelay has one normal user-facing launcher in the project root:
 
-- `DevRelay.cmd`: opens the local control GUI without choosing a connection mode on the command line.
+- `DevRelay.cmd`: runs the hidden startup bootstrap and opens either first-run Connection Setup or the normal control GUI.
 
-The launcher immediately hands off to a hidden local controller and shows a compact custom-framed WPF window hosting WebView2 instead of keeping a terminal open. The initial window is 780×560 with a 480×480 minimum; the last normal window size is remembered locally and restored on the next launch.
+The normal window is a custom-framed WPF/WebView2 host. The setup wizard is a separate WPF/WebView2 window using the same light visual language; it is not an overlay inside the main GUI.
+
+## Startup sequence
+
+`DevRelay.cmd` hands off to `gui/launch.vbs`, which starts `gui/Bootstrap-DevRelayGui.ps1` without a console window.
+
+The bootstrap performs these steps in order:
+
+1. Refuse a duplicate GUI launch.
+2. Check for the latest published GitHub Release and safely fast-forward an eligible clean official checkout.
+3. Load or migrate `.devrelay/setup.json`.
+4. If connection setup is incomplete, run the separate `gui/setup/setup-wizard.mjs` window and wait for it to finish.
+5. Start `gui/devrelay-gui.mjs` only after setup is complete.
+
+A cancelled first-run wizard leaves setup incomplete and the normal GUI does not auto-start.
 
 ## Release updates
 
-Before the GUI controller starts, `gui/Bootstrap-DevRelayGui.ps1` runs the release updater. It checks only GitHub's latest published full Release; ordinary branch pushes and prereleases are not followed.
+The release updater checks only GitHub's latest published full Release. Ordinary branch pushes, standalone tags, drafts, and prereleases are not followed.
 
-The updater modifies the checkout only when `origin` is the official DevRelay repository, the Git worktree is clean, and the current commit can fast-forward to the release commit. Forks, dirty worktrees, source archives without `.git`, offline machines, and development checkouts ahead of the release are left untouched. When an update is applied, the normal launcher setup prepares dependencies/build before the updated GUI starts. The last update-check result is written under `.devrelay/update-state.json` and shown in the Server log.
+The checkout is modified only when `origin` is the official DevRelay repository, the worktree is clean, and the current commit can fast-forward to the release commit. Forks, dirty worktrees, source archives without `.git`, offline machines, and development checkouts ahead of a release are left untouched. `.devrelay` is outside Git and survives updates.
 
-## Mode selection
+## Connection Setup
 
-The GUI Settings value is the single source of truth for connection mode. The first launch defaults to `HTTPS Named Tunnel`. After that, `gui-settings.json` restores the saved choice between:
+Connection selection is owned by the setup wizard, not by the main Settings panel. `.devrelay/setup.json` records the selected connection family/provider but contains no API keys.
 
-- `HTTPS Named Tunnel`: Cloudflare Named Tunnel with a fixed public HTTPS MCP URL and DevRelay OAuth 2.1 protection.
-- `OpenAI Secure Tunnel`: the official OpenAI Secure MCP Tunnel client in front of the local MCP endpoint.
+The top-level choices are:
 
-The double-click launcher and `gui/launch.vbs` do not inject or override a mode. Changing mode therefore happens in one place: Settings while DevRelay is stopped.
+- **OpenAI Secure Tunnel** - the preferred private/outbound architecture. It is currently shown as Experimental because known upstream ChatGPT/tunnel-client reports can prevent connector creation or tool refresh even when the local tunnel is healthy. The wizard names issues #71, #57, and #41 and attempts a non-blocking OPEN/CLOSED status refresh from GitHub.
+- **HTTPS** - DevRelay exposes its HTTP MCP endpoint through an HTTPS provider and enables DevRelay OAuth 2.1.
 
-## Control GUI
+HTTPS offers:
 
-The GUI is intentionally part of the safety model: DevRelay should not appear to be running invisibly in the background.
+- **Tailscale Funnel** - recommended HTTPS provider. No custom domain is required. If Tailscale is missing, the wizard can download the current official Windows installer and run it with UAC; sign-in remains the normal Tailscale browser flow.
+- **Cloudflare Named Tunnel** - stable public hostname. Requires a Cloudflare account and a domain already managed by Cloudflare. The wizard uses `cloudflared tunnel login`, tunnel creation, and DNS routing rather than automating the Cloudflare Dashboard.
+- **Cloudflare Quick Tunnel** - no account/domain required. It is temporary: a new `trycloudflare.com` URL can be assigned after restart.
 
-- The custom title bar contains the red Start/Stop control, a settings gear, and the window controls.
-- The main body contains `Command log` and `Server log`. Their divider is draggable and its ratio is remembered in WebView local storage.
-- Settings stay hidden until the gear button is pressed. Theme can change while running; connection and device-name settings require the server to be stopped.
-- Device Settings show the editable name, generated default name, aliases, immutable node ID, and local online/offline state.
-- `#FFFFFF Soft` is the default theme and `#000000 Soft` is available from Settings.
-- Noto Sans Mono is used throughout the UI. The launcher installs the official Google Fonts Noto Sans Mono for the current Windows user only when it is missing.
-- The WPF host remembers the last normal window size under `.devrelay/window-state.json`.
-- Closing the GUI window stops DevRelay and the active tunnel.
+Provider operations happen only after the user presses the corresponding setup button. Merely opening the wizard does not sign in, install software, create a tunnel, or modify provider-side resources.
 
-The local GUI controller listens only on `127.0.0.1:7318` and rejects state-changing requests from other browser origins. It uses a heartbeat from the visible app window; if that heartbeat disappears, the controller shuts down the server/tunnel process tree.
+## Transaction and reset behavior
 
-## HTTPS mode
+Reopening `Connection Setup...` while DevRelay is stopped starts the same separate wizard. DevRelay keeps the existing `setup.json` as the active connection until **Finish setup** is pressed.
 
-The GUI invokes the internal PowerShell worker with `-Mode https`, starts DevRelay on `127.0.0.1:7317`, and launches the configured Cloudflare Named Tunnel. HTTPS mode also enables OAuth 2.1; incoming authorization requests automatically open Settings so the local user can Approve or Deny the connection. The fixed URL is read from `.devrelay/https-named.json`.
+Local OpenAI/Cloudflare connection files are backed up for the wizard session. Cancel/close restores those local files. Provider-side resources that the user explicitly creates during setup are not silently deleted.
 
-## OpenAI Secure Tunnel mode
+Advanced Reset removes DevRelay's local connection credentials/configuration. It does not uninstall Tailscale and does not automatically delete remote Tailscale or Cloudflare resources.
 
-The GUI invokes the same worker with `-Mode chatgpt`. The worker validates and starts the official OpenAI Secure MCP Tunnel client. The tunnel ID is stored in `.devrelay/launcher.json`; the runtime API key is stored with Windows DPAPI for the current user.
+## ChatGPT registration guidance
+
+The final wizard page documents the registration path for the selected connection.
+
+For OpenAI Secure Tunnel:
+
+1. Enable ChatGPT Developer Mode.
+2. Open Apps / Plugins and Create (+).
+3. Choose a Tunnel connection and select the prepared tunnel.
+4. Choose **No authentication** for the MCP server.
+5. Create / Scan Tools. If ChatGPT-side creation or refresh fails while the local tunnel is healthy, check the displayed upstream issue numbers.
+
+For HTTPS providers:
+
+1. Enable ChatGPT Developer Mode.
+2. Open Apps / Plugins and Create (+).
+3. Enter the public DevRelay `/mcp` URL.
+4. Choose **OAuth** authentication.
+5. Create / Scan Tools, then approve the OAuth request in the visible DevRelay main window.
+
+## Main control GUI
+
+The main Settings panel no longer has a `Mode` selector. It shows the current Connection and a `Connection Setup...` button. Port, Auto start, Theme, device name, and aliases remain normal settings.
+
+Connection Setup can only be opened while the runtime is stopped. The GUI controller reloads `setup.json` after the wizard exits and updates the displayed connection/endpoint.
+
+The main controller listens only on `127.0.0.1:7318` and rejects state-changing requests from other browser origins. The setup controller similarly binds only to `127.0.0.1:7319` and applies the same Host/Origin boundary.
+
+## Runtime ownership
+
+`scripts/DevRelay-Launcher.ps1` no longer accepts a connection `-Mode`. It reads `.devrelay/setup.json` and runs the selected connection:
+
+- OpenAI Secure Tunnel: prepare/validate the saved tunnel-client profile and run it beside local DevRelay.
+- Tailscale Funnel: start local DevRelay with HTTPS OAuth metadata and supervise a Funnel process.
+- Cloudflare Named Tunnel: start local DevRelay and the saved Named Tunnel configuration.
+- Cloudflare Quick Tunnel: obtain the temporary public URL first, set OAuth issuer/resource from that URL, then start local DevRelay.
+
+The launcher is non-interactive. Missing connection credentials produce an error directing the user back to Connection Setup instead of hidden `Read-Host` prompts.
+
+`-SetupOnly -NoTunnel` remains a provider-independent maintenance path used by the release updater to install npm dependencies/build after an update.
 
 ## Internal implementation
 
-- `gui/devrelay-gui.mjs`: local GUI controller, saved-settings owner, and process owner.
-- `gui/public/`: the Noto Sans Mono log/settings interface with Soft light/dark themes.
-- `gui/host/`: custom WPF window chrome and WebView2 host/setup scripts.
-- `gui/launch.vbs`: hidden no-argument handoff from `DevRelay.cmd`.
-- `gui/Bootstrap-DevRelayGui.ps1`: single-instance startup bootstrap and release-update handoff.
-- `scripts/Update-DevRelayFromRelease.ps1`: safe release-only Git updater.
-- `scripts/DevRelay-Launcher.ps1`: internal build, MCP, and tunnel setup/supervision worker. The GUI passes `-Mode https` or `-Mode chatgpt` explicitly.
+- `gui/Bootstrap-DevRelayGui.ps1`: release update, setup-state check, first-run wizard handoff, normal GUI launch.
+- `gui/setup/setup-state.mjs`: setup schema, legacy migration, labels, persistence.
+- `gui/setup/setup-wizard.mjs`: setup-only local controller on port 7319.
+- `gui/setup/public/`: setup wizard web UI.
+- `gui/devrelay-gui.mjs`: normal GUI controller and runtime owner.
+- `gui/public/`: main log/settings UI.
+- `gui/host/DevRelay-GuiHost.ps1`: shared custom WPF/WebView2 host; SetupMode hides main-window Start/Settings controls.
+- `scripts/DevRelay-SetupActions.ps1`: explicit setup actions invoked by the wizard.
+- `scripts/DevRelay-ProviderTools.ps1`: provider executable download/discovery and DPAPI helpers.
+- `scripts/DevRelay-Launcher.ps1`: non-interactive runtime supervisor.
+- `scripts/Update-DevRelayFromRelease.ps1`: safe release-only updater.
 
-Mutable launcher data remains under `internal/.devrelay/`: tunnel state, GUI settings, window state, WebView2 profile/SDK cache, optional font cache, OAuth state, and logs. Each visible window launch gets its own `logs/yyyyMMdd-HHmmss-xxxxxxxx/` directory; only the latest three visible launches are retained.
+Mutable state remains under `internal/.devrelay/` and is excluded from Git.

@@ -9,7 +9,8 @@ const deviceDefaultName = $("#deviceDefaultName");
 const deviceStatus = $("#deviceStatus");
 const deviceNodeId = $("#deviceNodeId");
 const themeSelect = $("#themeSelect");
-const modeSelect = $("#modeSelect");
+const connectionName = $("#connectionName");
+const connectionSetup = $("#connectionSetup");
 const portInput = $("#portInput");
 const autoStartInput = $("#autoStartInput");
 const saveSettings = $("#saveSettings");
@@ -167,7 +168,7 @@ function render(state) {
     deviceStatus.textContent = state.device?.online ? "Online" : "Offline";
     deviceNodeId.textContent = state.device?.nodeId || "-";
     themeSelect.value = state.theme === "black-soft" ? "black-soft" : "white-soft";
-    modeSelect.value = state.mode;
+    connectionName.textContent = state.connectionLabel || "Not configured";
     portInput.value = state.port;
     autoStartInput.checked = state.autoStart;
   }
@@ -176,7 +177,7 @@ function render(state) {
   deviceNameInput.disabled = deviceLocked || requestBusy;
   deviceAliasesInput.disabled = deviceLocked || requestBusy;
   themeSelect.disabled = requestBusy;
-  modeSelect.disabled = active || transition;
+  connectionSetup.disabled = active || transition || state.setupOpen || requestBusy;
   portInput.disabled = active || transition;
   autoStartInput.disabled = active || transition;
   saveSettings.disabled = requestBusy;
@@ -250,8 +251,25 @@ themeSelect.addEventListener("change", () => {
 [deviceNameInput, deviceAliasesInput, portInput].forEach((element) => {
   element.addEventListener("input", () => { settingsDirty = true; });
 });
-[modeSelect, autoStartInput].forEach((element) => {
-  element.addEventListener("change", () => { settingsDirty = true; });
+autoStartInput.addEventListener("change", () => { settingsDirty = true; });
+
+connectionSetup.addEventListener("click", async () => {
+  if (requestBusy || !lastState || lastState.running || lastState.starting || lastState.stopping) return;
+  requestBusy = true;
+  connectionSetup.disabled = true;
+  settingsMessage.classList.remove("error");
+  settingsMessage.textContent = "Opening connection setup...";
+  try {
+    const value = await api("/api/setup", { method: "POST", body: "{}" });
+    render(value);
+    settingsMessage.textContent = "Connection Setup opened in a separate window.";
+  } catch (error) {
+    settingsMessage.textContent = error.message;
+    settingsMessage.classList.add("error");
+  } finally {
+    requestBusy = false;
+    await refresh();
+  }
 });
 
 saveSettings.addEventListener("click", async () => {
@@ -266,7 +284,6 @@ saveSettings.addEventListener("click", async () => {
         deviceName: deviceNameInput.value.trim(),
         deviceAliases: deviceAliasesInput.value.split(",").map((value) => value.trim()).filter(Boolean),
         theme: themeSelect.value,
-        mode: modeSelect.value,
         port: Number(portInput.value),
         autoStart: autoStartInput.checked
       })

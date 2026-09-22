@@ -14,7 +14,7 @@
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test --test-force-exit dist/test/*.test.js",
+    "test": "npm run build && node --test --test-force-exit dist/test/*.test.js gui/setup/*.test.mjs",
     "start": "node dist/src/main.js",
     "start:http": "node dist/src/main.js --http",
     "gui": "node gui/devrelay-gui.mjs",

@@ -3,7 +3,13 @@ param(
   [Parameter(Mandatory = $true)][string]$Url,
   [Parameter(Mandatory = $true)][string]$SdkRoot,
   [Parameter(Mandatory = $true)][string]$ProfileDir,
-  [Parameter(Mandatory = $true)][string]$WindowStatePath
+  [Parameter(Mandatory = $true)][string]$WindowStatePath,
+  [string]$Title = "DevRelay",
+  [switch]$SetupMode,
+  [ValidateRange(480, 2000)][double]$InitialWidth = 780,
+  [ValidateRange(480, 1600)][double]$InitialHeight = 560,
+  [ValidateRange(400, 1200)][double]$MinimumWidth = 480,
+  [ValidateRange(360, 1200)][double]$MinimumHeight = 480
 )
 
 Set-StrictMode -Version Latest
@@ -159,6 +165,11 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+$window.Title = $Title
+$window.Width = $InitialWidth
+$window.Height = $InitialHeight
+$window.MinWidth = $MinimumWidth
+$window.MinHeight = $MinimumHeight
 
 function Test-WindowDimension([double]$Value, [double]$Minimum) {
   return -not [double]::IsNaN($Value) -and -not [double]::IsInfinity($Value) -and $Value -ge $Minimum -and $Value -le 10000
@@ -188,11 +199,19 @@ if (Test-Path -LiteralPath $iconPath) {
   } catch { Write-Host "[GuiHost] Window icon load failed: $($_.Exception.Message)" }
 }
 $web = $window.FindName("WebView")
+$titleBar = $window.FindName("TitleBar")
+$titleText = $window.FindName("TitleText")
 $powerButton = $window.FindName("PowerButton")
 $settingsButton = $window.FindName("SettingsButton")
 $minButton = $window.FindName("MinButton")
 $maxButton = $window.FindName("MaxButton")
 $closeButton = $window.FindName("CloseButton")
+$titleText.Text = $Title
+if ($SetupMode) {
+  $powerButton.Visibility = [Windows.Visibility]::Collapsed
+  $settingsButton.Visibility = [Windows.Visibility]::Collapsed
+  $titleBar.ColumnDefinitions[2].Width = New-Object Windows.GridLength(0)
+}
 $brushConverter = New-Object Windows.Media.BrushConverter
 function Brush([string]$Color) { return $brushConverter.ConvertFromString($Color) }
 function Resource-Brush([string]$Name, [string]$Color) { $window.Resources[$Name] = Brush $Color }$origin = ([Uri]$Url).GetLeftPart([UriPartial]::Authority)

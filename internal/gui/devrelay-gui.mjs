@@ -5,6 +5,7 @@ import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -15,6 +16,7 @@ const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
+const setupWizardPath = path.join(guiDir, "setup", "setup-wizard.mjs");
 const guiPort = 7318;
 const hostDir = path.join(guiDir, "host");
 const hostSetupPath = path.join(hostDir, "Ensure-WebView2Sdk.ps1");
@@ -38,6 +40,17 @@ if (await existingGuiIsRunning()) process.exit(0);
 
 await mkdir(stateDir, { recursive: true });
 await mkdir(logsRoot, { recursive: true });
+
+let setup = await ensureSetupState(internalRoot);
+if (!setup.completed) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("exit", () => resolve());
+  });
+  setup = await ensureSetupState(internalRoot);
+  if (!setup.completed) process.exit(0);
+}
 
 function localStamp(date) {
   const two = (n) => String(n).padStart(2, "0");
@@ -66,13 +79,14 @@ async function pruneLogSessions() {
 await pruneLogSessions();
 
 let settings = await loadSettings();
-let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, mode: settings.mode, theme: settings.theme };
+let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, connection: connectionLabel(setup.connection), theme: settings.theme };
 async function persistSessionMeta(values = {}) {
   sessionMeta = { ...sessionMeta, ...values };
   await writeFile(sessionPath, `${JSON.stringify(sessionMeta, null, 2)}\n`, "utf8");
 }
 await persistSessionMeta();
 let runtime = null;
+let setupProcess = null;
 let windowHost = null;
 let shuttingDown = false;
 let closeTimer = null;
@@ -80,7 +94,7 @@ let windowLaunchedAt = 0;
 let lastHeartbeatAt = 0;
 let auditSeen = 0;
 let autoStartPending = settings.autoStart;
-let publicUrl = await resolvePublicUrl(settings.mode);
+let publicUrl = connectionPublicUrl(setup.connection);
 let oauthControlSecret = null;
 let oauthPending = [];
 let deviceInfo = await readDeviceInfo();
@@ -127,37 +141,29 @@ async function loadSettings() {
   try {
     const parsed = JSON.parse(await readFile(settingsPath, "utf8"));
     return {
-      mode: parsed.mode === "chatgpt" ? "chatgpt" : "https",
       port: Number.isInteger(parsed.port) ? parsed.port : 7317,
       autoStart: parsed.autoStart !== false,
       theme: parsed.theme === "black-soft" ? "black-soft" : "white-soft"
     };
   } catch {
-    return { mode: "https", port: 7317, autoStart: true, theme: "white-soft" };
+    return { port: 7317, autoStart: true, theme: "white-soft" };
   }
 }
 async function saveSettings() {
-  const persisted = { mode: settings.mode, port: settings.port, autoStart: settings.autoStart, theme: settings.theme };
+  const persisted = { port: settings.port, autoStart: settings.autoStart, theme: settings.theme };
   await writeFile(settingsPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
-}
-
-async function resolvePublicUrl(mode) {
-  if (mode !== "https") return "OpenAI Secure MCP Tunnel";
-  try {
-    const named = JSON.parse(await readFile(path.join(stateDir, "https-named.json"), "utf8"));
-    return named.hostname ? `https://${named.hostname}/mcp` : "HTTPS Named Tunnel";
-  } catch {
-    return "HTTPS Named Tunnel";
-  }
 }
 
 function snapshot() {
   return {
     ...state,
-    mode: settings.mode,
     port: settings.port,
     autoStart: settings.autoStart,
     theme: settings.theme,
+    connection: setup.connection,
+    connectionLabel: connectionLabel(setup.connection),
+    setupComplete: setup.completed,
+    setupOpen: setupProcess !== null,
     sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
@@ -214,24 +220,27 @@ async function startRuntime() {
   state.stopping = false;
   state.lastError = null;
   state.startedAt = null;
-  publicUrl = await resolvePublicUrl(settings.mode);
+  setup = await ensureSetupState(internalRoot);
+  if (!setup.completed || !setup.connection) {
+    state.starting = false;
+    throw new Error("Connection setup is incomplete. Open Connection Setup first.");
+  }
+  publicUrl = connectionPublicUrl(setup.connection);
 
   const args = [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
     "-File", launcherPath,
-    "-Mode", settings.mode,
     "-Port", String(settings.port)
   ];
 
-  oauthControlSecret = `${randomUUID()}${randomUUID()}`.replaceAll("-", "");
+  const usesOAuth = setup.connection.kind === "https";
+  oauthControlSecret = usesOAuth ? `${randomUUID()}${randomUUID()}`.replaceAll("-", "") : null;
   oauthPending = [];
-  const oauthEnv = settings.mode === "https" && publicUrl.startsWith("https://") ? {
-    DEVRELAY_OAUTH_ISSUER: new URL(publicUrl).origin,
-    DEVRELAY_OAUTH_RESOURCE: publicUrl,
+  const oauthEnv = usesOAuth ? {
     DEVRELAY_OAUTH_CONTROL_SECRET: oauthControlSecret,
     DEVRELAY_STATE_DIR: stateDir
   } : {};
-  pushLog(pluginLogs, `[GUI] Starting ${settings.mode.toUpperCase()} mode...`);
+  pushLog(pluginLogs, `[GUI] Starting ${connectionLabel(setup.connection)}...`);
   runtime = spawn("powershell.exe", args, {
     cwd: internalRoot,
     windowsHide: true,
@@ -305,7 +314,7 @@ async function stopRuntime(reason = "user") {
 }
 
 async function pollOAuthPending() {
-  if (!runtime || !oauthControlSecret || settings.mode !== "https") { oauthPending = []; return; }
+  if (!runtime || !oauthControlSecret || setup.connection?.kind !== "https") { oauthPending = []; return; }
   try {
     const response = await fetch(`http://127.0.0.1:${settings.port}/oauth/internal/pending`, {
       headers: { "x-devrelay-control-secret": oauthControlSecret }, cache: "no-store"
@@ -363,7 +372,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, snapshot());
     }
     if (req.method === "POST" && url.pathname === "/api/oauth/decision") {
-      if (!oauthControlSecret || settings.mode !== "https") return sendJson(res, 409, { error: "OAuth runtime is not active." });
+      if (!oauthControlSecret || setup.connection?.kind !== "https") return sendJson(res, 409, { error: "OAuth runtime is not active." });
       const body = await readJson(req);
       const response = await fetch(`http://127.0.0.1:${settings.port}/oauth/internal/decision`, {
         method: "POST",
@@ -377,7 +386,6 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/settings") {
       const next = await readJson(req);
-      const mode = next.mode === "chatgpt" ? "chatgpt" : "https";
       const port = Number(next.port);
       const autoStart = next.autoStart !== false;
       const theme = next.theme === "black-soft" ? "black-soft" : "white-soft";
@@ -388,7 +396,7 @@ const server = http.createServer(async (req, res) => {
       const deviceAliases = Array.isArray(next.deviceAliases)
         ? [...new Set(next.deviceAliases.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean))].slice(0, 16)
         : (deviceInfo?.aliases ?? []);
-      const runtimeSettingChanged = mode !== settings.mode || port !== settings.port || autoStart !== settings.autoStart;
+      const runtimeSettingChanged = port !== settings.port || autoStart !== settings.autoStart;
       const deviceChanged = deviceInfo && (deviceName !== deviceInfo.name || JSON.stringify(deviceAliases) !== JSON.stringify(deviceInfo.aliases ?? []));
       if ((runtime || state.starting || state.running) && (runtimeSettingChanged || deviceChanged)) {
         return sendJson(res, 409, { error: "Stop DevRelay before changing runtime or device settings." });
@@ -398,11 +406,28 @@ const server = http.createServer(async (req, res) => {
         deviceInfo = { ...deviceInfo, name: deviceName, aliases: deviceAliases, updatedAt: new Date().toISOString() };
         await writeFile(devicePath, `${JSON.stringify(deviceInfo, null, 2)}\n`, "utf8");
       }
-      settings = { mode, port, autoStart, theme };
-      publicUrl = await resolvePublicUrl(settings.mode);
+      settings = { port, autoStart, theme };
       await saveSettings();
-      await persistSessionMeta({ mode: settings.mode, theme: settings.theme });
+      await persistSessionMeta({ connection: connectionLabel(setup.connection), theme: settings.theme });
       return sendJson(res, 200, snapshot());
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/setup") {
+      if (runtime || state.starting || state.running || state.stopping) {
+        return sendJson(res, 409, { error: "Stop DevRelay before changing connection setup." });
+      }
+      if (!setupProcess) {
+        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+        setupProcess.once("error", (error) => { pushLog(pluginLogs, `[GUI] Setup window failed: ${error.message}`, "error"); setupProcess = null; });
+        setupProcess.once("exit", async () => {
+          setupProcess = null;
+          setup = await ensureSetupState(internalRoot);
+          publicUrl = connectionPublicUrl(setup.connection);
+          await persistSessionMeta({ connection: connectionLabel(setup.connection) });
+          pushLog(pluginLogs, `[GUI] Connection setup: ${connectionLabel(setup.connection)}`);
+        });
+      }
+      return sendJson(res, 202, snapshot());
     }
 
     if (req.method === "POST" && url.pathname === "/api/heartbeat") {
@@ -473,6 +498,7 @@ async function shutdown(reason) {
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
   await stopRuntime(reason);
   await persistSessionMeta({ endedAt: new Date().toISOString(), status: "closed", exitReason: reason });
+  if (setupProcess?.pid) await taskkill(setupProcess.pid);
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);

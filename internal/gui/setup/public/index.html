@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-theme="white-soft">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DevRelay Setup</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="setup-shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">DEVRELAY SETUP</div>
+        <h1>Connect this PC to ChatGPT</h1>
+        <p id="heroText">Choose a connection. Existing settings are not replaced until setup finishes.</p>
+      </div>
+      <div id="busyBadge" class="status-pill" hidden>Working窶ｦ</div>
+    </header>
+
+    <section id="notice" class="notice" hidden></section>
+    <section id="currentCard" class="current-card" hidden></section>
+
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="Setup path"></nav>
+    <section id="content" class="content" aria-live="polite"></section>
+
+    <footer class="footer">
+      <button id="backButton" class="button secondary" type="button" hidden>Back</button>
+      <div class="footer-spacer"></div>
+      <button id="cancelButton" class="button secondary" type="button">Cancel</button>
+      <button id="finishButton" class="button primary" type="button" hidden>Finish setup</button>
+    </footer>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

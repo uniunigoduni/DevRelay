@@ -51,12 +51,11 @@
             <option value="black-soft">#000000 Soft</option>
           </select>
         </label>
-        <label>Mode
-          <select id="modeSelect">
-            <option value="https">HTTPS Named Tunnel</option>
-            <option value="chatgpt">OpenAI Secure Tunnel</option>
-          </select>
-        </label>
+        <div class="connection-setting">
+          <span>Connection</span>
+          <strong id="connectionName">Not configured</strong>
+          <button id="connectionSetup" class="secondary-button" type="button">Connection Setup...</button>
+        </div>
         <label>Port
           <input id="portInput" type="number" min="1024" max="65535" step="1" inputmode="numeric">
         </label>

@@ -8,6 +8,8 @@ $GuiRoot = $PSScriptRoot
 $InternalRoot = Split-Path -Parent $GuiRoot
 $UpdateScript = Join-Path $InternalRoot "scripts\Update-DevRelayFromRelease.ps1"
 $GuiScript = Join-Path $GuiRoot "devrelay-gui.mjs"
+$SetupStateScript = Join-Path $GuiRoot "setup\setup-state.mjs"
+$SetupWizardScript = Join-Path $GuiRoot "setup\setup-wizard.mjs"
 
 $mutex = New-Object Threading.Mutex($false, "Local\DevRelayGuiBootstrap")
 $ownsMutex = $false
@@ -25,6 +27,18 @@ try {
   }
 
   $node = Get-Command node.exe -ErrorAction Stop
+
+  & $node.Source $SetupStateScript $InternalRoot | Out-Null
+  $setupCode = $LASTEXITCODE
+  if ($setupCode -eq 10) {
+    & $node.Source $SetupWizardScript
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $node.Source $SetupStateScript $InternalRoot | Out-Null
+    if ($LASTEXITCODE -ne 0) { exit 0 }
+  } elseif ($setupCode -ne 0) {
+    throw "DevRelay setup-state check failed with code $setupCode."
+  }
+
   $startInfo = New-Object Diagnostics.ProcessStartInfo
   $startInfo.FileName = $node.Source
   $startInfo.Arguments = '"' + $GuiScript.Replace('"', '\"') + '"'
