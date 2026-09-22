@@ -9,7 +9,6 @@ const deviceDefaultName = $("#deviceDefaultName");
 const deviceStatus = $("#deviceStatus");
 const deviceNodeId = $("#deviceNodeId");
 const themeSelect = $("#themeSelect");
-const connectionName = $("#connectionName");
 const connectionSetup = $("#connectionSetup");
 const portInput = $("#portInput");
 const autoStartInput = $("#autoStartInput");
@@ -168,7 +167,6 @@ function render(state) {
     deviceStatus.textContent = state.device?.online ? "Online" : "Offline";
     deviceNodeId.textContent = state.device?.nodeId || "-";
     themeSelect.value = state.theme === "black-soft" ? "black-soft" : "white-soft";
-    connectionName.textContent = state.connectionLabel || "Not configured";
     portInput.value = state.port;
     autoStartInput.checked = state.autoStart;
   }

@@ -122,8 +122,8 @@ function renderChoose() {
   content.innerHTML = `
     <h2 class="section-title">Connection</h2>
     <div class="choice-grid">
-      ${choiceCard({ id: "openai", title: "OpenAI Secure Tunnel", badge: "EXPERIMENTAL", badgeClass: "experimental", selected: selected === "openai" })}
-      ${choiceCard({ id: "https", title: "HTTPS", selected: selected && selected !== "openai" })}
+      ${choiceCard({ id: "openai", title: "OpenAI Secure Tunnel", badge: "RECOMMENDED / EXPERIMENTAL", badgeClass: "experimental", selected: selected === "openai", copy: "No third-party tunnel service is required. Known OpenAI issue #71 currently makes this option likely to fail on Windows / ChatGPT Plus." })}
+      ${choiceCard({ id: "https", title: "HTTPS", selected: selected && selected !== "openai", copy: "Connect through a Tailscale or Cloudflare HTTPS tunnel." })}
     </div>
     <details class="advanced">
       <summary>Reset</summary>
@@ -155,8 +155,8 @@ function renderHttps() {
   content.innerHTML = `
     <h2 class="section-title">HTTPS provider</h2>
     <div class="choice-grid">
-      ${choiceCard({ id: "tailscale", title: "Tailscale Funnel", badge: "RECOMMENDED", badgeClass: "recommended", selected: selected === "tailscale" })}
-      ${choiceCard({ id: "cloudflare", title: "Cloudflare", selected: selected?.startsWith("cloudflare") })}
+      ${choiceCard({ id: "tailscale", title: "Tailscale Funnel", badge: "RECOMMENDED", badgeClass: "recommended", selected: selected === "tailscale", copy: "No custom domain required. Uses a stable *.ts.net hostname." })}
+      ${choiceCard({ id: "cloudflare", title: "Cloudflare", selected: selected?.startsWith("cloudflare"), copy: "Use your own Cloudflare-managed domain, or a temporary *.trycloudflare.com URL." })}
     </div>`;
   bindChoices(async (choice) => {
     if (choice === "tailscale") { await selectChoice("tailscale"); setPage("tailscale"); }
@@ -181,6 +181,12 @@ function renderOpenAI() {
   const ready = state?.draftReady && connectionChoice(state?.draft) === "openai";
   content.innerHTML = `
     <h2 class="section-title">OpenAI Secure Tunnel</h2>
+    <div class="card">
+      <p><strong>Known issue #71</strong></p>
+      <p>[Windows / Plus / v0.0.14] Tunnel connector creation fails in both No Auth and OAuth: server/discover 424 and DCR 404</p>
+      <p>This issue currently makes OpenAI Secure Tunnel likely to fail on Windows / ChatGPT Plus.</p>
+      <div class="actions"><button class="button secondary" type="button" data-link="openai-issue-71">Open issue #71</button></div>
+    </div>
     <div class="card">
       <label class="field">Tunnel ID<input id="tunnelId" autocomplete="off" placeholder="tunnel_................................"></label>
       <div class="actions"><button class="button secondary" type="button" data-link="openai-tunnels">Open Tunnel settings</button></div>

@@ -168,6 +168,7 @@ async function refreshProviderStatus(force = false) {
 const linkTargets = {
   "openai-tunnels": "https://platform.openai.com/settings/organization/tunnels",
   "openai-api-keys": "https://platform.openai.com/settings/organization/api-keys",
+  "openai-issue-71": "https://github.com/openai/tunnel-client/issues/71",
   "chatgpt-settings": "https://chatgpt.com/#settings/Connectors"
 };
 
