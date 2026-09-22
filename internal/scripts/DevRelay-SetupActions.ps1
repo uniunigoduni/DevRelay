@@ -126,6 +126,23 @@ function Get-TailscaleDnsName($Status) {
   return $dns.TrimEnd(".")
 }
 
+function Test-DevRelayPublicDnsRecord([string]$Hostname) {
+  try {
+    $labels = @($Hostname.Split(".") | Where-Object { $_ })
+    $nameServer = $null
+    for ($i = 1; $i -lt ($labels.Count - 1); $i++) {
+      $zone = ($labels[$i..($labels.Count - 1)] -join ".")
+      try {
+        $ns = @(Resolve-DnsName -Name $zone -Type NS -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.NameHost } | Select-Object -ExpandProperty NameHost)
+        if ($ns.Count -gt 0) { $nameServer = ([string]$ns[0]).TrimEnd("."); break }
+      } catch {}
+    }
+    if (-not $nameServer) { return $false }
+    $records = @(Resolve-DnsName -Name $Hostname -Server $nameServer -DnsOnly -QuickTimeout -ErrorAction Stop | Where-Object { $_.Type -in @("A", "AAAA", "CNAME") })
+    return $records.Count -gt 0
+  } catch { return $false }
+}
+
 try {
   switch ($Action) {
   "Status" {
@@ -247,6 +264,9 @@ try {
     $exe = Ensure-DevRelayCloudflared
     $certPath = Join-Path $HOME ".cloudflared\cert.pem"
     if (-not (Test-Path -LiteralPath $certPath)) { throw "Sign in to Cloudflare before using this hostname." }
+    if (Test-DevRelayPublicDnsRecord $hostname) {
+      throw "The hostname $hostname already has a public DNS record. Remove its existing A, AAAA, or CNAME record in Cloudflare DNS, or use another hostname. DevRelay will not overwrite existing DNS records."
+    }
 
     $list = Invoke-DevRelayExternal $exe @("tunnel", "list", "--output", "json")
     $tunnels = @()
@@ -261,7 +281,14 @@ try {
       $tunnelId = $match.Value
     }
 
-    Invoke-DevRelayExternal $exe @("tunnel", "route", "dns", $tunnelId, $hostname) | Out-Null
+    $route = Invoke-DevRelayExternal $exe @("tunnel", "route", "dns", $tunnelId, $hostname) -AllowFailure
+    if ($route.Code -ne 0) {
+      $routeText = $route.Output -join " "
+      if ($routeText -match 'code:\s*1003' -or $routeText -match 'already exists') {
+        throw "The hostname $hostname already has a DNS record in Cloudflare. Remove its existing A, AAAA, or CNAME record, or use another hostname. DevRelay will not overwrite existing DNS records."
+      }
+      throw "Cloudflare could not create the DNS route: $routeText"
+    }
 
     $sourceCredentials = Join-Path $HOME ".cloudflared\$tunnelId.json"
     if (-not (Test-Path -LiteralPath $sourceCredentials)) { throw "Cloudflare tunnel credentials were not found at $sourceCredentials" }

@@ -437,7 +437,9 @@ const server = http.createServer(async (req, res) => {
         setupProcess.once("exit", async () => {
           setupProcess = null;
           setup = await ensureSetupState(internalRoot);
-          publicUrl = connectionPublicUrl(setup.connection);
+          if (!runtime && !state.starting && !state.running && !state.stopping) {
+            publicUrl = connectionPublicUrl(setup.connection);
+          }
           await persistSessionMeta({ connection: connectionLabel(setup.connection) });
           pushLog(pluginLogs, `[GUI] Connection setup: ${connectionLabel(setup.connection)}`);
         });

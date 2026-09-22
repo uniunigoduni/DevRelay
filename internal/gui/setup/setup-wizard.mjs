@@ -12,6 +12,7 @@ import {
   saveSetupState
 } from "./setup-state.mjs";
 import { extractCloudflareApprovalUrl, extractTailscaleApprovalUrl, isTrustedSetupApprovalUrl } from "./tailscale-setup.mjs";
+import { waitForPublicOAuthReady } from "./registration-readiness.mjs";
 
 const setupDir = path.dirname(fileURLToPath(import.meta.url));
 const guiDir = path.resolve(setupDir, "..");
@@ -145,14 +146,25 @@ async function startMainGuiForRegistration() {
     throw new Error(value.error || `DevRelay start failed with HTTP ${startResponse.status}.`);
   }
 
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     mainState = await readMainGuiState();
     if (mainState?.lastError) throw new Error(mainState.lastError);
-    if (mainState?.running) return mainState;
+    if (mainState?.running) {
+      if (mainState.connection?.kind !== "https") return mainState;
+      if (/^https:\/\//i.test(mainState.publicUrl || "")) break;
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error("DevRelay main window opened, but the server did not become ready within 60 seconds. Check the Server log in the main window.");
+  if (!mainState?.running) {
+    throw new Error("DevRelay main window opened, but the server did not become ready within 90 seconds. Check the Server log in the main window.");
+  }
+  if (!/^https:\/\//i.test(mainState.publicUrl || "")) {
+    throw new Error("DevRelay is running, but no public HTTPS endpoint was reported.");
+  }
+  busyMessage = "Waiting for the public OAuth endpoint to become reachable...";
+  await waitForPublicOAuthReady(mainState.publicUrl);
+  return await readMainGuiState() || mainState;
 }
 
 async function runSetupAction(action, input = undefined, options = {}) {
