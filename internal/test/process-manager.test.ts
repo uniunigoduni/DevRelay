@@ -148,6 +148,20 @@ test("explicit outputEncoding supports legacy direct-process encodings", async (
   assert.equal(result.stdout, "é");
 });
 
+test("Windows PowerShell normalization preserves quoted command semantics", { skip: process.platform !== "win32" }, async () => {
+  const manager = new ProcessManager();
+  const result = await manager.execute({
+    command: `Write-Output "A B"; Write-Output "$env:TEMP X"; Write-Output '日本語 A B'; Write-Progress -Activity '進捗' -Status '確認' -PercentComplete 50`,
+    shell: "powershell"
+  });
+  const lines = result.stdout.split(/\r?\n/).filter(Boolean);
+  assert.equal(lines[0], "A B");
+  assert.equal(lines[1], `${process.env.TEMP} X`);
+  assert.equal(lines[2], "日本語 A B");
+  assert.equal(result.stderr, "");
+  assert.equal(result.exitCode, 0);
+});
+
 test("Windows PowerShell normalization preserves exit semantics", { skip: process.platform !== "win32" }, async () => {
   const manager = new ProcessManager();
   const nativeFailure = await manager.execute({ command: "cmd /c exit 7", shell: "powershell" });
@@ -156,6 +170,8 @@ test("Windows PowerShell normalization preserves exit semantics", { skip: proces
   const writeError = await manager.execute({ command: "Write-Error 'bad'", shell: "powershell" });
   assert.equal(writeError.exitCode, 1);
   assert.equal(writeError.ok, false);
+  assert.match(writeError.stderr, /bad/);
+  assert.doesNotMatch(writeError.stderr, /#< CLIXML/);
   const explicitExit = await manager.execute({ command: "exit 7", shell: "powershell" });
   assert.equal(explicitExit.exitCode, 7);
 });
