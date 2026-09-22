@@ -20,6 +20,7 @@ const oauthApproval = $("#oauthApproval");
 const oauthClientName = $("#oauthClientName");
 const oauthRedirectHost = $("#oauthRedirectHost");
 const oauthScopes = $("#oauthScopes");
+const oauthMessage = $("#oauthMessage");
 const approveOAuth = $("#approveOAuth");
 const denyOAuth = $("#denyOAuth");
 
@@ -151,7 +152,7 @@ settingsBackdrop.addEventListener("pointerup", (event) => {
 });
 settingsBackdrop.addEventListener("pointercancel", () => { backdropPointerStartedOutside = false; });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") setSettingsOpen(false);
+  if (event.key === "Escape" && oauthApproval.hidden) setSettingsOpen(false);
 });
 function render(state) {
   lastState = state;
@@ -185,13 +186,19 @@ function render(state) {
   if (pendingOAuth) {
     oauthClientName.textContent = pendingOAuth.clientName || "OAuth client";
     oauthRedirectHost.textContent = pendingOAuth.redirectHost || "unknown";
-    oauthScopes.textContent = (pendingOAuth.scopes || []).join(" ");
+    oauthScopes.textContent = (pendingOAuth.scopes || []).join(" ") || "-";
     approveOAuth.disabled = requestBusy;
     denyOAuth.disabled = requestBusy;
-    if (pendingOAuth.id !== lastOAuthPendingId) setSettingsOpen(true);
+    if (pendingOAuth.id !== lastOAuthPendingId) {
+      oauthMessage.textContent = "";
+      oauthMessage.classList.remove("error");
+      requestAnimationFrame(() => approveOAuth.focus());
+    }
     lastOAuthPendingId = pendingOAuth.id;
   } else {
     lastOAuthPendingId = null;
+    oauthMessage.textContent = "";
+    oauthMessage.classList.remove("error");
   }
 
   if (state.aiLogs.length !== lastAiCount) {
@@ -227,13 +234,13 @@ async function decideOAuth(approve) {
   const originalDenyText = denyOAuth.textContent;
   if (approve) approveOAuth.textContent = "Approving...";
   else denyOAuth.textContent = "Denying...";
-  settingsMessage.classList.remove("error");
-  settingsMessage.textContent = approve ? "Approving OAuth request..." : "Denying OAuth request...";
+  oauthMessage.classList.remove("error");
+  oauthMessage.textContent = approve ? "Approving access..." : "Rejecting access...";
   try {
     await api("/api/oauth/decision", { method: "POST", body: JSON.stringify({ id: pending.id, approve }) });
-    settingsMessage.textContent = approve ? "Approved. Returning the browser to ChatGPT..." : "Denied.";
+    oauthMessage.textContent = approve ? "Approved. Returning to ChatGPT..." : "Rejected.";
   } catch (error) {
-    settingsMessage.textContent = error.message; settingsMessage.classList.add("error");
+    oauthMessage.textContent = error.message; oauthMessage.classList.add("error");
   } finally {
     approveOAuth.textContent = originalApproveText; denyOAuth.textContent = originalDenyText;
     requestBusy = false; await refresh();
@@ -241,6 +248,15 @@ async function decideOAuth(approve) {
 }
 approveOAuth.addEventListener("click", () => { void decideOAuth(true); });
 denyOAuth.addEventListener("click", () => { void decideOAuth(false); });
+document.addEventListener("keydown", (event) => {
+  if (oauthApproval.hidden) return;
+  if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); return; }
+  if (event.key !== "Tab") return;
+  const first = denyOAuth;
+  const last = approveOAuth;
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
 
 themeSelect.addEventListener("change", () => {
   settingsDirty = true;

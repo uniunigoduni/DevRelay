@@ -26,16 +26,6 @@
     </section>    <div id="settingsBackdrop" class="settings-backdrop" aria-hidden="true">
       <aside id="settingsPanel" class="settings-panel" aria-label="Settings">
         <h3>Settings</h3>
-        <section id="oauthApproval" class="oauth-approval" hidden>
-          <div class="oauth-kicker">OAuth access request</div>
-          <strong id="oauthClientName">ChatGPT</strong>
-          <div class="oauth-detail">Redirect: <code id="oauthRedirectHost"></code></div>
-          <div class="oauth-detail">Scopes: <code id="oauthScopes"></code></div>
-          <div class="oauth-actions">
-            <button id="denyOAuth" type="button">Deny</button>
-            <button id="approveOAuth" type="button">Approve</button>
-          </div>
-        </section>
         <label>Device name
           <input id="deviceNameInput" type="text" maxlength="80" autocomplete="off">
         </label>
@@ -67,6 +57,21 @@
           <code id="publicUrl">-</code>
         </div>
       </aside>
+    </div>
+    <div id="oauthApproval" class="oauth-modal-backdrop" hidden>
+      <section class="oauth-modal" role="dialog" aria-modal="true" aria-labelledby="oauthModalTitle" aria-describedby="oauthModalDescription">
+        <div class="oauth-kicker">OAuth access request</div>
+        <h2 id="oauthModalTitle">Allow access to DevRelay?</h2>
+        <p id="oauthModalDescription">An application is requesting access to this DevRelay instance.</p>
+        <div class="oauth-client" id="oauthClientName">OAuth client</div>
+        <div class="oauth-detail">Redirect: <code id="oauthRedirectHost"></code></div>
+        <div class="oauth-detail">Scopes: <code id="oauthScopes"></code></div>
+        <div id="oauthMessage" class="oauth-message" aria-live="polite"></div>
+        <div class="oauth-actions">
+          <button id="denyOAuth" type="button">Reject</button>
+          <button id="approveOAuth" type="button">Approve</button>
+        </div>
+      </section>
     </div>
   </main>
   <script src="/app.js" defer></script>

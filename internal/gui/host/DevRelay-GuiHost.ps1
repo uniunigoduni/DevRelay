@@ -266,6 +266,7 @@ $script:lastState = $null
 $script:busy = $false
 $script:theme = ""
 $script:setupRuntimeVisible = $false
+$script:lastOAuthPendingId = ""
 
 function Show-DevRelayWindowForeground {
   try {
@@ -331,12 +332,21 @@ function Refresh-State {
       if ($hasRegistrationRuntime -and -not $script:setupRuntimeVisible) { Show-DevRelayWindowForeground }
       $script:setupRuntimeVisible = $hasRegistrationRuntime
     }
+    $oauthPendingId = ""
+    if (-not $SetupMode -and ($state.PSObject.Properties.Name -contains "oauthPending") -and $null -ne $state.oauthPending) {
+      $firstPending = @($state.oauthPending) | Select-Object -First 1
+      if ($null -ne $firstPending -and ($firstPending.PSObject.Properties.Name -contains "id")) { $oauthPendingId = [string]$firstPending.id }
+    }
+    if ($oauthPendingId -and $oauthPendingId -ne $script:lastOAuthPendingId) { Show-DevRelayWindowForeground }
+    $script:lastOAuthPendingId = $oauthPendingId
     $active = [bool]($state.running -or $state.starting)
     $powerButton.Content = if ($active) { "STOP" } else { "START" }
     $powerButton.Background = Brush $(if ($active) { "#D92D20" } else { "#B42318" })
     $powerButton.Foreground = Brush "#FFFFFF"
     $canStartOrStop = $active -or [bool]$state.setupComplete
-    $powerButton.IsEnabled = $canStartOrStop -and -not [bool]$state.stopping -and -not $script:busy
+    $oauthBlocking = [bool]$oauthPendingId
+    $powerButton.IsEnabled = $canStartOrStop -and -not [bool]$state.stopping -and -not $script:busy -and -not $oauthBlocking
+    if (-not $SetupMode) { $settingsButton.IsEnabled = -not $oauthBlocking }
   } catch { $powerButton.IsEnabled = $false }
 }
 $powerButton.Add_Click({
