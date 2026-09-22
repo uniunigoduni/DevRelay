@@ -39,9 +39,9 @@ devrelay --http
 
 MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一般的なGUI自動操作API、組み込みトンネル、LLM/エージェント機能を含めません。PTY/ConPTYと画像返却は、CLIだけでは不足する部分を既存6ツールのオプションとして最小限補完します。WindowsのランチャーGUIはコアとは分離したローカル制御UIです。
 
-## WindowsではDevRelay.cmdを使う
+## WindowsではDevRelay.exeを使う
 
-通常はプロジェクト直下の `DevRelay.cmd` をダブルクリックします。起動前に最新のpublished GitHub Releaseを確認し、その後にローカルの接続セットアップ状態を確認します。
+通常はプロジェクト直下の `DevRelay.exe` をダブルクリックします。`DevRelay.cmd` は互換用fallbackとして残しています。EXEはコンソールを出さずに既存bootstrapを起動し、Start Menuの `DevRelay.lnk` も `DevRelay.Desktop` AppUserModelID付きで作成/更新するため、タスクバーではPowerShellではなくDevRelayとしてピン留めできます。起動前に最新のpublished GitHub Releaseを確認し、その後にローカルの接続セットアップ状態を確認します。
 
 新規インストールでは通常GUIより先に、ライトテーマの別ウィンドウ **DevRelay Setup** が開きます。接続方式はこのWizardが管理し、メインGUIのSettingsには従来の `Mode` 選択はありません。
 
@@ -52,9 +52,9 @@ MCPコアにはDB、Git専用API、ファイル専用API、Docker専用API、一
 - **HTTPS / Cloudflare Named Tunnel**: 固定hostnameを使えますが、CloudflareアカウントとCloudflare管理下のドメインが必要です。Dashboardのブラウザ自動操作はせず、公式 `cloudflared` CLIのログイン・Tunnel作成・DNS routeを使います。
 - **HTTPS / Cloudflare Quick Tunnel**: アカウントもドメインも不要ですが、`trycloudflare.com` のURLは一時的で、Tunnel再作成後に変わることがあります。
 
-Wizardの最後にはChatGPTへの登録手順も表示します。OpenAI Secure TunnelではTunnel接続 + MCP側 `No authentication`、HTTPSでは公開 `/mcp` URL + `OAuth` を案内します。HTTPSのOAuth要求は通常のDevRelayウィンドウでApprove/Denyします。
+Wizardの最後にはChatGPTへの登録手順も表示します。OpenAI Secure TunnelではTunnel接続 + MCP側 `No authentication`、HTTPSでは公開 `/mcp` URL + `OAuth` を案内します。HTTPSのOAuth要求が来るとDevRelayメインウィンドウが前面に出て、画面全体を覆うblocking modalでApprove/Rejectします。
 
-一度セットアップした後は、メインSettingsの `Connection Setup...` から同じ別ウィンドウを再度開けます。新しい接続は **Finish setup** まで現在の `setup.json` を置き換えません。Cancel/ウィンドウを閉じた場合はWizard中に変更したローカル接続ファイルを復元します。Advanced ResetはDevRelay側の接続設定だけを消し、Tailscaleのアンインストールやprovider側のremote resource削除は自動では行いません。
+一度セットアップした後は、メインSettingsの `Connection Setup...` から同じ別ウィンドウを再度開けます。新しい接続は準備に成功した時点でChatGPT登録ガイドの表示前に確定します。最後のガイドは **Close** だけで閉じます。確定前にCancel/ウィンドウを閉じた場合はWizard中に変更したローカル接続ファイルを復元します。Advanced ResetはDevRelay側の接続設定だけを消し、Tailscaleのアンインストールやprovider側のremote resource削除は自動では行いません。
 
 GUIはOS標準フレームを使わないWPF/WebView2ウィンドウです。本文は `Command log` と `Server log`、中央の区切りはドラッグで比率変更でき、その比率をローカル保存します。赤いStart/Stopと歯車は自前タイトルバーに置きます。ウィンドウは最後の通常サイズを記憶し、最小サイズは480×480です。フォントはNoto Sans Mono、テーマは `#FFFFFF Soft` が既定で、設定から `#000000 Soft` に切り替えられます。GUIを閉じるとDevRelayと現在の接続processも停止します。詳細は [launcher.md](launcher.md) を参照してください。
 

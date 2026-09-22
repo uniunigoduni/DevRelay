@@ -22,6 +22,15 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Xaml
 Add-Type -AssemblyName System.Drawing
 
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class DevRelayShellIdentity {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+}
+'@
+[void][DevRelayShellIdentity]::SetCurrentProcessExplicitAppUserModelID("DevRelay.Desktop")
+
 $lib = Join-Path $SdkRoot "package\lib\net462"
 $native = Join-Path $SdkRoot "package\runtimes\win-x64\native"
 $coreDll = Join-Path $lib "Microsoft.Web.WebView2.Core.dll"

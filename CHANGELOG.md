@@ -9,12 +9,14 @@ All notable changes to DevRelay are documented here.
 - Added a separate first-run/reconfiguration Setup Wizard using the existing light WPF/WebView2 visual language. It guides OpenAI Secure Tunnel, recommended HTTPS/Tailscale Funnel, Cloudflare Named Tunnel, Cloudflare Quick Tunnel, and ChatGPT registration.
 - Added live non-blocking status display for known OpenAI Secure Tunnel upstream issues #71, #57, and #41, while keeping their exact issue numbers/titles visible offline.
 - Added provider helpers for official OpenAI tunnel-client/cloudflared acquisition, optional official Tailscale Windows installation, browser sign-in handoffs, DPAPI secret storage, and local connection reset.
+- Added a thin taskbar-friendly `DevRelay.exe` Windows launcher with the same AppUserModelID as the WPF host; `DevRelay.cmd` remains as a compatibility fallback.
 
 ### Changed
 
 - Removed connection `Mode` from the main Settings panel and runtime launcher. Connection selection now lives in `.devrelay/setup.json` and is changed through `Connection Setup...` while stopped. Existing HTTPS/OpenAI settings migrate automatically.
 - The runtime launcher is now non-interactive and connection-driven. HTTPS OAuth issuer/resource are derived from the selected provider URL; Cloudflare Quick Tunnel URLs are resolved per launch.
-- Setup reconfiguration keeps the current active connection until Finish and restores backed-up local provider files on Cancel/close.
+- Setup reconfiguration commits a successfully prepared connection before the ChatGPT registration guide; the guide now closes with a single Close action. Cancel/close before commit restores backed-up local provider files.
+- Incoming HTTPS OAuth authorization requests now bring the main window forward and use a blocking approval modal instead of appearing inside Settings.
 
 ## 0.2.0 - 2026-09-22
 

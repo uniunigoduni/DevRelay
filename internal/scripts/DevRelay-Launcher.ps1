@@ -73,7 +73,7 @@ function Build-Is-Stale {
 function Ensure-Build {
   $node = Get-Command node.exe -ErrorAction SilentlyContinue
   $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-  if (-not $node -or -not $npm) { throw "Node.js 20+ and npm are required. Install Node.js, then rerun DevRelay.cmd." }
+  if (-not $node -or -not $npm) { throw "Node.js 20+ and npm are required. Install Node.js, then rerun DevRelay.exe." }
 
   $state = Read-JsonFile $StatePath
   $lockHash = Get-LockHash
@@ -134,7 +134,7 @@ function Clear-HttpsOAuth {
 function Require-Setup {
   $setup = Read-JsonFile $SetupPath
   if ($null -eq $setup -or -not [bool](Get-ObjectValue $setup "completed" $false) -or $null -eq $setup.connection) {
-    throw "DevRelay connection setup is incomplete. Run DevRelay.cmd and finish Connection Setup."
+    throw "DevRelay connection setup is incomplete. Run DevRelay.exe and complete Connection Setup."
   }
   return $setup
 }

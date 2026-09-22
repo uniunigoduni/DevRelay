@@ -1,4 +1,4 @@
-# DevRelay
+﻿# DevRelay
 
 DevRelay is a deliberately small MCP server that gives an MCP client access to the command line of a development machine.
 
@@ -154,13 +154,13 @@ The implementation patterns and interoperability references used for v0.1 are do
 
 ## Automatic release updates
 
-On Windows, `DevRelay.cmd` checks for the latest **published GitHub Release** before starting the GUI. Ordinary pushes to `main`, standalone tags, drafts, and prereleases are not an update channel.
+On Windows, `DevRelay.exe` (or the `DevRelay.cmd` compatibility launcher) checks for the latest **published GitHub Release** before starting the GUI. Ordinary pushes to `main`, standalone tags, drafts, and prereleases are not an update channel.
 
 An update is applied only when the checkout uses the official DevRelay `origin`, the Git worktree is clean, and the current commit can fast-forward to the release commit. Development checkouts that are ahead of a release, diverged checkouts, forks, dirty worktrees, offline machines, and non-Git source archives are left untouched and start normally. Machine-local `.devrelay` state is not part of Git and is preserved.
 
 ## Windows double-click launcher
 
-For normal Windows use, double-click `DevRelay.cmd`. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup.
+For normal Windows use, double-click `DevRelay.exe`. `DevRelay.cmd` remains available as a compatibility fallback. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup. On launch, DevRelay also creates or refreshes a per-user Start Menu shortcut with the same AppUserModelID as the WPF windows so the app can be pinned to the taskbar as DevRelay rather than PowerShell.
 
 A fresh install opens a separate light-theme **DevRelay Setup** window before the main GUI. Connection setup is chosen there rather than through a `Mode` field in the main window:
 
@@ -171,9 +171,9 @@ A fresh install opens a separate light-theme **DevRelay Setup** window before th
 
 The wizard also shows the ChatGPT registration steps. Secure Tunnel uses a Tunnel connection with no MCP authentication; HTTPS endpoints use DevRelay OAuth and require the local DevRelay window to approve the OAuth request. Provider-specific live interoperability should be validated in the target account/workspace because those external services can change independently of DevRelay.
 
-After setup, the main GUI shows the current Connection and endpoint. `Connection Setup...` reopens the separate wizard while DevRelay is stopped. The current connection is not replaced until setup finishes; Cancel restores the previous local connection files. Advanced Reset removes DevRelay's local connection configuration but does not uninstall Tailscale or automatically delete provider-side tunnel resources.
+After setup, the main GUI shows the current Connection and endpoint. `Connection Setup...` reopens the separate wizard while DevRelay is stopped. The current connection stays active while a replacement is being prepared; once preparation succeeds, the new connection is committed before the ChatGPT registration guide appears. Cancel/close before that point restores the previous local connection files. Advanced Reset removes DevRelay's local connection configuration but does not uninstall Tailscale or automatically delete provider-side tunnel resources.
 
-The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480x480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped; an incoming HTTPS OAuth authorization request opens Settings automatically for local approval. Closing the GUI stops DevRelay and its active connection process.
+The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480x480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped; an incoming HTTPS OAuth authorization request brings the main window forward and shows a blocking approval dialog over the app. Closing the GUI stops DevRelay and its active connection process.
 
 Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 

@@ -1,14 +1,15 @@
 # Windows launcher
 
-DevRelay has one normal user-facing launcher in the project root:
+DevRelay has a normal Windows launcher in the project root:
 
-- `DevRelay.cmd`: runs the hidden startup bootstrap and opens either first-run Connection Setup or the normal control GUI.
+- `DevRelay.exe`: primary taskbar-friendly launcher.
+- `DevRelay.cmd`: compatibility fallback for the same hidden startup bootstrap.
 
 The normal window is a custom-framed WPF/WebView2 host. The setup wizard is a separate WPF/WebView2 window using the same light visual language; it is not an overlay inside the main GUI.
 
 ## Startup sequence
 
-`DevRelay.cmd` hands off to `gui/launch.vbs`, which starts `gui/Bootstrap-DevRelayGui.ps1` without a console window.
+`DevRelay.exe` starts `gui/Bootstrap-DevRelayGui.ps1` directly without a console window. The compatibility `DevRelay.cmd` path still hands off through `gui/launch.vbs`. The EXE also creates or refreshes the current user's Start Menu `DevRelay.lnk` with `DevRelay.Desktop`, matching the AppUserModelID set by the WPF host for correct taskbar grouping and pinning.
 
 The bootstrap performs these steps in order:
 
@@ -45,7 +46,7 @@ Provider operations happen only after the user presses the corresponding setup b
 
 ## Transaction and reset behavior
 
-Reopening `Connection Setup...` while DevRelay is stopped starts the same separate wizard. DevRelay keeps the existing `setup.json` as the active connection until **Finish setup** is pressed.
+Reopening `Connection Setup...` while DevRelay is stopped starts the same separate wizard. DevRelay keeps the existing connection while a replacement is being prepared. Once preparation succeeds, the prepared connection is committed before the ChatGPT registration guide is shown; that final guide closes with **Close**.
 
 Local OpenAI/Cloudflare connection files are backed up for the wizard session. Cancel/close restores those local files. Provider-side resources that the user explicitly creates during setup are not silently deleted.
 
@@ -69,7 +70,7 @@ For HTTPS providers:
 2. Open Apps / Plugins and Create (+).
 3. Enter the public DevRelay `/mcp` URL.
 4. Choose **OAuth** authentication.
-5. Create / Scan Tools, then approve the OAuth request in the visible DevRelay main window.
+5. Create / Scan Tools, then approve the OAuth request in the blocking DevRelay approval dialog. The main window is brought forward when a new request arrives.
 
 ## Main control GUI
 
@@ -94,6 +95,8 @@ The launcher is non-interactive. Missing connection credentials produce an error
 
 ## Internal implementation
 
+- `launcher/DevRelayLauncher.cs`: thin Windows EXE launcher with the DevRelay taskbar identity.
+- `scripts/Build-DevRelayLauncher.ps1`: builds the root `DevRelay.exe`.
 - `gui/Bootstrap-DevRelayGui.ps1`: release update, setup-state check, first-run wizard handoff, normal GUI launch.
 - `gui/setup/setup-state.mjs`: setup schema, legacy migration, labels, persistence.
 - `gui/setup/setup-wizard.mjs`: setup-only local controller on port 7319.
