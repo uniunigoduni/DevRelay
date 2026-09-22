@@ -24,6 +24,10 @@ All notable changes to DevRelay are documented here.
 - Added PNG/JPEG/WebP/GIF result attachments through `exec.images` and `process_read.images`.
 - Added `node-pty` as the single native dependency required for real terminal sessions.
 
+### Fixed
+
+- GUI custom scrollbars now follow the active surface: log scrollbars stay hidden while Settings is open, and the Settings scrollbar stays hidden on the default log view.
+
 ### Changed
 
 - Windows PowerShell normalization now executes the decoded command from an ephemeral UTF-16LE script file, preserving quoting, variable expansion, readable error output, and exit semantics without re-parsing through a nested native `powershell.exe -Command` call.

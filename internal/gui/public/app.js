@@ -289,8 +289,14 @@ void refresh();
     };
   }
   function updateThumbs(scroller, controller) {
+    const settingsOpen = settingsBackdrop.classList.contains("open");
+    const belongsToSettings = settingsBackdrop.contains(scroller);
+    const activeSurface = settingsOpen ? belongsToSettings : !belongsToSettings;
+    const style = getComputedStyle(scroller);
     const rect = scroller.getBoundingClientRect();
-    const visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
+    const visible = activeSurface
+      && style.display !== "none" && style.visibility !== "hidden"
+      && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
       && rect.top < window.innerHeight && rect.left < window.innerWidth;
     if (!visible) {
       controller.vertical.classList.remove("visible");
@@ -376,6 +382,8 @@ void refresh();
 
     const mutations = new MutationObserver(() => scheduleUpdate());
     mutations.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const settingsVisibility = new MutationObserver(scheduleUpdate);
+    settingsVisibility.observe(settingsBackdrop, { attributes: true, attributeFilter: ["class", "aria-hidden"] });
     window.addEventListener("resize", scheduleUpdate, { passive: true });
     document.addEventListener("scroll", scheduleUpdate, { passive: true, capture: true });
   }
