@@ -30,6 +30,16 @@ Runtime dependencies should remain minimal. Prefer Node.js standard-library APIs
 
 A new dependency should provide a capability that would otherwise require substantial platform-specific code or protocol code. Convenience-only packages such as CLI parsers, logging frameworks, utility libraries, and test frameworks are intentionally avoided.
 
+## Restarting the visible GUI
+
+When DevRelay changes itself while the Windows GUI is running, hand restart off to a detached helper instead of trying to stop the current MCP process tree in-place:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\Restart-DevRelayGui.ps1
+```
+
+The script returns after scheduling the restart. It then closes the current GUI host outside the DevRelay process tree, waits for the controller to exit, and starts the normal no-argument GUI launcher again. Use `-DryRun` to validate discovery without restarting.
+
 ## Adding a tool
 
 Before adding an MCP tool, check whether the same operation can be expressed reliably as a command through `exec` or `process_start`. A first-class tool is justified when it provides a primitive that command composition cannot represent cleanly, or when it materially improves model/tool semantics without duplicating a normal CLI.

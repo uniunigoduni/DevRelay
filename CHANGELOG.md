@@ -35,6 +35,9 @@ All notable changes to DevRelay are documented here.
 
 ### Changed
 
+- MCP tool results now default to compact JSON that omits repeated device/default metadata while preserving full results through `detail=full`; managed-process retention and output limits are unchanged. `process_list` now shows running processes by default and can include retained completed processes on demand.
+- Added a tracked self-restart helper for safely handing GUI/controller/runtime restart outside the current DevRelay process tree.
+
 - Consolidated the former mode-specific Windows launchers and GUI command-line mode overrides into one saved Settings-driven launch flow. The internal PowerShell worker now uses explicit `-Mode https|chatgpt` selection.
 - Windows PowerShell normalization now executes the decoded command from an ephemeral UTF-16LE script file, preserving quoting, variable expansion, readable error output, and exit semantics without re-parsing through a nested native `powershell.exe -Command` call.
 
