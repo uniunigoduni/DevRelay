@@ -37,7 +37,7 @@ Pipe sessions use Node `child_process.spawn()`. Terminal sessions use `node-pty`
 
 Pipe stdout/stderr are captured as ordered events. PTY output is a single terminal stream and is represented as `stdout`, including ANSI control sequences.
 
-Every event receives a monotonically increasing cursor. `process_read` accepts the previous `nextCursor`; buffers are rolling and bounded by characters.
+Every event receives a monotonically increasing cursor. `process_read` accepts the previous `nextCursor`; buffers are rolling and bounded by characters. Compact MCP responses omit per-event cursor/timestamp metadata while preserving event order and `nextCursor`; `detail: "full"` exposes the stored metadata.
 
 ## Image return
 
@@ -55,6 +55,6 @@ MCP protocol handling belongs to the official SDK. DevRelay uses stdio or Stream
 
 ## Device identity and multi-device model
 
-Each DevRelay owns one local `DeviceIdentity`, persisted under `.devrelay/device.json`. The immutable `nodeId` is separate from the editable display name; `defaultName` is recomputed from OS/hardware facts and aliases are optional. Tool results expose this local identity with `online: true` while the endpoint is responding.
+Each DevRelay owns one local `DeviceIdentity`, persisted under `.devrelay/device.json`. The immutable `nodeId` is separate from the editable display name; `defaultName` is recomputed from OS/hardware facts and aliases are optional. Compact tool results identify the endpoint by display name; full identity metadata remains available through `detail: "full"`.
 
 DevRelay has no built-in device federation. Multiple machines are represented by multiple independently registered MCP plugins/connectors. Process IDs remain local to the DevRelay instance that created them, and there is no peer listener, cluster secret, discovery protocol, or cross-device forwarding.

@@ -239,7 +239,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
       description: "List managed processes. Running processes are shown by default; completed retained processes can be included on demand.",
       _meta: oauthToolMeta,
       inputSchema: z.object({
-        includeCompleted: z.boolean().optional().default(false).describe("Include completed processes that are still retained for reading."),
+        includeCompleted: z.boolean().optional().default(true).describe("Include completed processes that are still retained for reading. Set false for running processes only."),
         detail: detailSchema.describe("compact returns identification/status fields; full returns detailed process snapshots and device metadata.")
       })
     },

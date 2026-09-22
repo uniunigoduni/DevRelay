@@ -1,14 +1,14 @@
 # Tool reference
 
-DevRelay keeps exactly six MCP tools. Command results are returned as MCP text content, and `exec` / `process_read` can additionally return requested image files as MCP image content. Results include the local DevRelay device identity so multiple separately registered endpoints remain distinguishable.
+DevRelay keeps exactly six MCP tools. Command results are returned as compact JSON in MCP text content, and `exec` / `process_read` can additionally return requested image files as MCP image content. Compact results identify the local DevRelay by its display name; use `detail: "full"` when the complete device/process metadata is needed.
 
 A non-zero command exit code is a normal command result, not an MCP transport error.
 
 ## `exec`
 
-Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`, `shell`, `outputEncoding`, `stdin`, `timeoutMs`, `maxOutputChars`, and `images`.
+Runs a command until it exits. Inputs: `command`, optional `args`, `cwd`, `env`, `shell`, `outputEncoding`, `stdin`, `timeoutMs`, `maxOutputChars`, `images`, and `detail`.
 
-`args` is valid only with `shell: "direct"`. The result contains `ok`, `exitCode`, `signal`, `timedOut`, `stdout`, `stderr`, `truncated`, `startedAt`, and `endedAt`.
+`args` is valid only with `shell: "direct"`. Compact output always reports `ok` and only emits meaningful non-default fields such as stdout/stderr, a non-zero exit code, timeout, signal, or truncation. `detail: "full"` returns the previous complete lifecycle/device metadata including timestamps.
 
 `images` accepts up to four PNG, JPEG, WebP, or GIF paths. Relative paths resolve from `cwd`; images are loaded after the command exits and returned as MCP `image` content. Each image is limited to 20 MiB.
 
@@ -18,7 +18,7 @@ Starts a command without waiting for completion. It accepts the common command f
 
 Set `terminal: true` to allocate a PTY/ConPTY for interactive terminal applications. `columns` and `rows` default to 120×30. Multiple terminal and non-terminal sessions can coexist because every start returns an independent DevRelay process ID.
 
-The process snapshot reports `terminal`, `columns`, and `rows` in addition to the OS PID and normal lifecycle fields.
+Compact output returns the DevRelay process ID and OS PID, adding terminal dimensions only for PTY sessions. Use `detail: "full"` for the complete process snapshot.
 
 ## `process_read`
 
@@ -26,7 +26,7 @@ Inputs are `processId`, `cursor`, `maxChars`, `waitMs`, and optional `images`. S
 
 `maxChars` is a soft response target between output events, not a strict byte/character ceiling. DevRelay does not split a retained event merely to satisfy `maxChars`, so one event can make a read exceed the requested value; this preserves cursor semantics without dropping part of an event.
 
-Output is an ordered `events` array. Pipe sessions report `stdout` and `stderr` separately. PTY sessions expose the terminal byte stream as `stdout`, including normal ANSI terminal control sequences.
+Compact output is an ordered `events` array containing only `stream` and `text`, plus `nextCursor` and running/final status. Internal event cursors and timestamps remain stored; `detail: "full"` exposes them together with the full process snapshot. Pipe sessions report `stdout` and `stderr` separately. PTY sessions expose the terminal byte stream as `stdout`, including normal ANSI terminal control sequences.
 
 `images` uses the same image limits as `exec`; relative paths resolve from the managed process working directory.
 
@@ -42,7 +42,7 @@ Stops a managed process and removes the session from the registry. `force` defau
 
 ## `process_list`
 
-Returns `{ device, processes }`, where `device` describes this DevRelay instance and reports `online: true`, and `processes` contains all sessions retained by the local ProcessManager, including recently completed sessions whose output is still available.
+Returns compact identification/status records for sessions retained by the local ProcessManager, including recently completed sessions by default so older output remains discoverable. Set `includeCompleted: false` to list only running sessions. Use `detail: "full"` for complete process snapshots and full device metadata.
 
 ## Common command fields
 
