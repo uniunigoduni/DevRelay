@@ -26,6 +26,7 @@ All notable changes to DevRelay are documented here.
 
 ### Fixed
 
+- GUI log panes can now be resized with a draggable splitter, and the split ratio is remembered locally. The minimum window width was reduced from 680px to 480px.
 - GUI custom scrollbars now follow the active surface: log scrollbars stay hidden while Settings is open, and the Settings scrollbar stays hidden on the default log view.
 
 ### Changed

@@ -28,7 +28,7 @@ New-Item -ItemType Directory -Force -Path $ProfileDir | Out-Null
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        Title="DevRelay" Width="780" Height="560" MinWidth="680" MinHeight="480"
+        Title="DevRelay" Width="780" Height="560" MinWidth="480" MinHeight="480"
         WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
         Background="{DynamicResource WindowBackgroundBrush}" Foreground="{DynamicResource TextPrimaryBrush}"
         FontFamily="Noto Sans Mono" UseLayoutRounding="True" SnapsToDevicePixels="True">

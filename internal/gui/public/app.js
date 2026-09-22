@@ -1,4 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
+const logs = $(".logs");
+const logSplitter = $("#logSplitter");
 const aiLog = $("#aiLog");
 const pluginLog = $("#pluginLog");
 const deviceNameInput = $("#deviceNameInput");
@@ -27,6 +29,70 @@ let lastAiCount = -1;
 let lastPluginCount = -1;
 let requestBusy = false;
 let settingsDirty = false;
+
+const LOG_SPLIT_STORAGE_KEY = "devrelay.logSplitRatio";
+const LOG_SPLIT_MIN_RATIO = 0.15;
+const LOG_SPLIT_MAX_RATIO = 0.85;
+let logSplitRatio = 0.5;
+
+try {
+  const savedRatio = Number(localStorage.getItem(LOG_SPLIT_STORAGE_KEY));
+  if (Number.isFinite(savedRatio)) logSplitRatio = Math.max(LOG_SPLIT_MIN_RATIO, Math.min(LOG_SPLIT_MAX_RATIO, savedRatio));
+} catch {}
+
+function applyLogSplit(ratio = logSplitRatio, persist = false) {
+  const splitterSize = logSplitter.getBoundingClientRect().height || 10;
+  const available = Math.max(0, logs.clientHeight - splitterSize);
+  if (!available) return;
+  logSplitRatio = Math.max(LOG_SPLIT_MIN_RATIO, Math.min(LOG_SPLIT_MAX_RATIO, ratio));
+  const commandHeight = Math.round(available * logSplitRatio);
+  logs.style.gridTemplateRows = `${commandHeight}px ${splitterSize}px minmax(0, 1fr)`;
+  logSplitter.setAttribute("aria-valuenow", String(Math.round(logSplitRatio * 100)));
+  if (persist) {
+    try { localStorage.setItem(LOG_SPLIT_STORAGE_KEY, String(logSplitRatio)); } catch {}
+  }
+}
+
+function setLogSplitFromPointer(clientY, persist = false) {
+  const rect = logs.getBoundingClientRect();
+  const splitterSize = logSplitter.getBoundingClientRect().height || 10;
+  const available = Math.max(1, rect.height - splitterSize);
+  applyLogSplit((clientY - rect.top - splitterSize / 2) / available, persist);
+}
+
+logSplitter.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  logSplitter.setPointerCapture(event.pointerId);
+  logSplitter.classList.add("dragging");
+  document.body.classList.add("dragging-log-splitter");
+  setLogSplitFromPointer(event.clientY);
+});
+logSplitter.addEventListener("pointermove", (event) => {
+  if (!logSplitter.hasPointerCapture(event.pointerId)) return;
+  setLogSplitFromPointer(event.clientY);
+});
+function finishLogSplitDrag(event) {
+  if (!logSplitter.hasPointerCapture(event.pointerId)) return;
+  setLogSplitFromPointer(event.clientY, true);
+  logSplitter.releasePointerCapture(event.pointerId);
+  logSplitter.classList.remove("dragging");
+  document.body.classList.remove("dragging-log-splitter");
+}
+logSplitter.addEventListener("pointerup", finishLogSplitDrag);
+logSplitter.addEventListener("pointercancel", (event) => {
+  if (logSplitter.hasPointerCapture(event.pointerId)) logSplitter.releasePointerCapture(event.pointerId);
+  logSplitter.classList.remove("dragging");
+  document.body.classList.remove("dragging-log-splitter");
+  applyLogSplit(logSplitRatio, true);
+});
+logSplitter.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  applyLogSplit(logSplitRatio + (event.key === "ArrowDown" ? 0.05 : -0.05), true);
+});
+window.addEventListener("resize", () => applyLogSplit());
+requestAnimationFrame(() => applyLogSplit());
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
