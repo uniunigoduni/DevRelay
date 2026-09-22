@@ -48,6 +48,7 @@ if (!setup.completed) {
     child.once("error", reject);
     child.once("exit", () => resolve());
   });
+  if (await existingGuiIsRunning()) process.exit(0);
   setup = await ensureSetupState(internalRoot);
   if (!setup.completed) process.exit(0);
 }

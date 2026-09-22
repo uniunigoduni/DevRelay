@@ -98,7 +98,7 @@ function renderBreadcrumbs() {
     if (page === "cloudflare" || page.startsWith("cloudflare-")) trail.push("cloudflare");
     if (!["https", "cloudflare"].includes(page)) trail.push(page);
   } else if (page === "openai") trail.push("choose", "openai");
-  else if (page === "guide") trail.push("choose", "guide");
+  else if (page === "guide") trail.push("guide");
 
   const locked = requestBusy || state?.busy;
   breadcrumbs.innerHTML = trail.map((entry, index) => {
@@ -293,21 +293,24 @@ function guideSteps(connection) {
     <div class="guide-step">Choose Connection: Tunnel and select the prepared tunnel.</div>
     <div class="guide-step">Authentication: No authentication.</div>`;
   if (choice === "cloudflare-quick") return `
-    <div class="guide-step">Finish setup and start DevRelay.</div>
-    <div class="guide-step">In ChatGPT, use the Endpoint shown in DevRelay.</div>
-    <div class="guide-step">Authentication: OAuth.</div>`;
+    <div class="guide-step">In ChatGPT, open Apps / Plugins and choose Create (+).</div>
+    <div class="guide-step">Use the endpoint shown above.</div>
+    <div class="guide-step">Authentication: OAuth.</div>
+    <div class="guide-step">Approve the DevRelay access request in the main window if prompted.</div>`;
   return `
     <div class="guide-step">In ChatGPT, open Apps / Plugins and choose Create (+).</div>
     <div class="guide-step">Use the endpoint shown above.</div>
     <div class="guide-step">Authentication: OAuth.</div>
-    <div class="guide-step">Approve the DevRelay access request if prompted.</div>`;
+    <div class="guide-step">Approve the DevRelay access request in the main window if prompted.</div>`;
 }
 
 function renderGuide() {
   const connection = state?.draft;
-  const endpoint = connectionEndpoint(connection);
+  const runtimeEndpoint = state?.registrationRuntime?.publicUrl || "";
+  const endpoint = /^https:\/\//i.test(runtimeEndpoint) ? runtimeEndpoint : connectionEndpoint(connection);
   content.innerHTML = `
     <h2 class="section-title">ChatGPT</h2>
+    <p class="section-copy">The DevRelay main window is open and the server is running. Keep it open while adding DevRelay to ChatGPT.</p>
     ${endpoint ? `<div class="endpoint-box">${escapeHtml(endpoint)}</div>` : ""}
     <div class="actions"><button class="button secondary" type="button" data-link="chatgpt-settings">Open ChatGPT settings</button></div>
     <div class="guide">${guideSteps(connection)}</div>`;
@@ -382,7 +385,8 @@ function renderChrome() {
     openApprovalButton.hidden = !approval;
     abortSetupButton.disabled = false;
   }
-  backButton.hidden = page === "choose";
+  backButton.hidden = page === "choose" || page === "guide";
+  cancelButton.textContent = page === "guide" ? "Close" : "Cancel";
   finishButton.hidden = !(page === "guide" && state?.draftReady);
   finishButton.disabled = locked;
   cancelButton.disabled = locked;

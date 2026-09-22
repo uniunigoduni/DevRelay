@@ -29,6 +29,8 @@ const profileDir = path.join(stateDir, "setup-webview2-profile");
 const windowStatePath = path.join(stateDir, "setup-window-state.json");
 const setupActionsPath = path.join(internalRoot, "scripts", "DevRelay-SetupActions.ps1");
 const settingsPath = path.join(stateDir, "gui-settings.json");
+const mainGuiPath = path.join(guiDir, "devrelay-gui.mjs");
+const mainGuiOrigin = "http://127.0.0.1:7318";
 
 let currentSetup = await ensureSetupState(internalRoot);
 let draftConnection = currentSetup.connection ? structuredClone(currentSetup.connection) : null;
@@ -44,6 +46,7 @@ let providerStatus = null;
 let providerStatusAt = 0;
 let activeSetupChild = null;
 let approvalUrl = null;
+let registrationRuntime = null;
 
 const backupRoot = path.join(stateDir, "setup-backups", randomUUID());
 const backupEntries = ["launcher.json", "control-plane-api-key.dpapi", "tunnel-profiles", "cloudflare-named.json", "https-named.json", "cloudflare"];
@@ -103,6 +106,53 @@ function execFilePromise(file, args, options = {}) {
 async function openSetupApproval(url) {
   if (!isTrustedSetupApprovalUrl(url)) throw new Error("Refused an untrusted setup approval URL.");
   await execFilePromise("rundll32.exe", ["url.dll,FileProtocolHandler", new URL(url).href]);
+}
+
+async function readMainGuiState() {
+  try {
+    const response = await fetch(`${mainGuiOrigin}/api/state`, { cache: "no-store" });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch { return null; }
+}
+
+async function waitForMainGui(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await readMainGuiState();
+    if (state) return state;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error("DevRelay main window did not start in time.");
+}
+
+async function startMainGuiForRegistration() {
+  let mainState = await readMainGuiState();
+  if (!mainState) {
+    const child = spawn(process.execPath, [mainGuiPath], {
+      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore"
+    });
+    child.unref();
+    mainState = await waitForMainGui();
+  }
+
+  const startResponse = await fetch(`${mainGuiOrigin}/api/start`, {
+    method: "POST",
+    headers: { origin: mainGuiOrigin }
+  });
+  if (!startResponse.ok) {
+    const value = await startResponse.json().catch(() => ({}));
+    throw new Error(value.error || `DevRelay start failed with HTTP ${startResponse.status}.`);
+  }
+
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    mainState = await readMainGuiState();
+    if (mainState?.lastError) throw new Error(mainState.lastError);
+    if (mainState?.running) return mainState;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("DevRelay main window opened, but the server did not become ready within 60 seconds. Check the Server log in the main window.");
 }
 
 async function runSetupAction(action, input = undefined, options = {}) {
@@ -212,6 +262,7 @@ async function apiState() {
     busyMessage,
     busyNeedsUser,
     approvalUrl,
+    registrationRuntime,
     error: lastError
   };
 }
@@ -249,6 +300,22 @@ async function withBusy(message, fn, { needsUser = false } = {}) {
   finally { busy = false; busyMessage = ""; busyNeedsUser = false; abortRequested = false; approvalUrl = null; }
 }
 
+async function activatePreparedSetup() {
+  if (!draftConnection || !draftReady) throw new Error("Prepare a connection before opening ChatGPT registration.");
+  const previousSetup = currentSetup;
+  busyMessage = "Opening the DevRelay main window and starting the server...";
+  currentSetup = await saveSetupState(internalRoot, { completed: true, connection: draftConnection });
+  try {
+    registrationRuntime = await startMainGuiForRegistration();
+  } catch (error) {
+    currentSetup = await saveSetupState(internalRoot, previousSetup);
+    throw error;
+  }
+  draftConnection = structuredClone(currentSetup.connection);
+  draftReady = true;
+  await commitConnectionBackup();
+}
+
 async function handleAction(body) {
   const action = body.action;
   if (action === "install-tailscale") return await withBusy(
@@ -284,6 +351,7 @@ async function handleAction(body) {
     });
     draftConnection = { kind: "https", provider: "tailscale", publicUrl: result.publicUrl };
     draftReady = true;
+    await activatePreparedSetup();
     return result;
   });
   if (action === "cloudflare-install") return await withBusy("Preparing cloudflared...", async () => {
@@ -306,18 +374,21 @@ async function handleAction(body) {
     const result = await runSetupAction("ConfigureCloudflareNamed", { hostname: body.hostname, tunnelName: body.tunnelName || "devrelay" });
     draftConnection = { kind: "https", provider: "cloudflare", variant: "named", publicUrl: result.publicUrl };
     draftReady = true;
+    await activatePreparedSetup();
     return result;
   });
   if (action === "cloudflare-quick") return await withBusy("Preparing Cloudflare Quick Tunnel...", async () => {
     const result = await runSetupAction("PrepareCloudflareQuick");
     draftConnection = { kind: "https", provider: "cloudflare", variant: "quick", persistent: false };
     draftReady = true;
+    await activatePreparedSetup();
     return result;
   });
   if (action === "openai-configure") return await withBusy("Preparing OpenAI Secure Tunnel...", async () => {
     const result = await runSetupAction("ConfigureOpenAI", { tunnelId: body.tunnelId, apiKey: body.apiKey });
     draftConnection = { kind: "openai-secure-tunnel" };
     draftReady = true;
+    await activatePreparedSetup();
     return result;
   });
   throw new Error("Unknown setup action.");
