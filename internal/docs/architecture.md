@@ -53,6 +53,12 @@ Every event receives a monotonically increasing cursor. `process_read` accepts t
 
 MCP protocol handling belongs to the official SDK. DevRelay uses stdio or Streamable HTTP independently of ProcessManager. Neither transport contains Git, filesystem, Docker, browser, or language-specific logic.
 
+## HTTP diagnostics
+
+Streamable HTTP requests receive a local request ID before entering the MCP SDK. DevRelay records only protocol-level metadata needed for diagnosis: JSON-RPC method, tool name for `tools/call`, response status, and duration. Tool arguments and request bodies are not logged. Diagnostic lines go to the Server log; command audit events remain in the Command log.
+
+The HTTP runtime emits a lightweight heartbeat every 30 minutes with uptime, request/tool-call counts for the preceding window, error count, active managed-process count, and the timestamps of the most recent MCP request, `tools/list`, and `tools/call`. The heartbeat uses already-observed local state and performs no external health probe.
+
 ## Device identity and multi-device model
 
 Each DevRelay owns one local `DeviceIdentity`, persisted under `.devrelay/device.json`. The immutable `nodeId` is separate from the editable display name; `defaultName` is recomputed from OS/hardware facts and aliases are optional. Compact tool results identify the endpoint by display name; full identity metadata remains available through `detail: "full"`.

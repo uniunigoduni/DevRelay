@@ -4,6 +4,8 @@ import { ProcessManager } from "./process-manager.js";
 import { loadImageContents } from "./image-content.js";
 import type { CommandSpec } from "./types.js";
 import type { DeviceIdentity } from "./device-identity.js";
+import type { McpDiagnostics } from "./diagnostics.js";
+import { VERSION } from "./version.js";
 
 const shellSchema = z.enum(["auto", "cmd", "powershell", "pwsh", "direct"]);
 const oauthToolMeta = { securitySchemes: [{ type: "oauth2", scopes: ["devrelay"] }] };
@@ -38,16 +40,17 @@ async function contentResult(value: unknown, images: string[] | undefined, baseD
   ] };
 }
 
-function errorResult(error: unknown) {
+function errorResult(error: unknown, diagnostics?: McpDiagnostics, requestId?: string, tool?: string) {
+  diagnostics?.reportError("tool", error, { requestId, tool });
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text" as const, text: JSON.stringify({ error: message }) }], isError: true };
 }
 
-async function handled<T>(fn: () => Promise<T> | T) {
+async function handled<T>(tool: string, fn: () => Promise<T> | T, diagnostics?: McpDiagnostics, requestId?: string) {
   try {
     return textResult(await fn());
   } catch (error) {
-    return errorResult(error);
+    return errorResult(error, diagnostics, requestId, tool);
   }
 }
 
@@ -125,8 +128,14 @@ export function compactProcessListItem(process: ReturnType<ProcessManager["list"
   return result;
 }
 
-export function createDevRelayServer(manager: ProcessManager, identity: DeviceIdentity): McpServer {
-  const server = new McpServer({ name: "devrelay", version: "0.2.0" });
+export interface DevRelayServerOptions {
+  diagnostics?: McpDiagnostics;
+  requestId?: string;
+}
+
+export function createDevRelayServer(manager: ProcessManager, identity: DeviceIdentity, options: DevRelayServerOptions = {}): McpServer {
+  const { diagnostics, requestId } = options;
+  const server = new McpServer({ name: "devrelay", version: VERSION });
 
   server.registerTool(
     "exec",
@@ -148,7 +157,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
         });
         const payload = input.detail === "full" ? { device: deviceView(identity), ...value } : compactExec(identity.name, value);
         return await contentResult(payload, input.images, input.cwd ?? process.cwd());
-      } catch (error) { return errorResult(error); }
+      } catch (error) { return errorResult(error, diagnostics, requestId, "exec"); }
     }
   );
 
@@ -165,10 +174,10 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
         detail: detailSchema.describe("compact returns only the process handle and essential terminal metadata; full returns the detailed snapshot.")
       })
     },
-    async (input) => handled(async () => {
+    async (input) => handled("process_start", async () => {
       const process = await manager.start(toCommandSpec(input), input.maxBufferChars, { terminal: input.terminal, columns: input.columns, rows: input.rows });
       return input.detail === "full" ? { device: deviceView(identity), process } : compactProcessStart(identity.name, process);
-    })
+    }, diagnostics, requestId)
   );
 
   server.registerTool(
@@ -190,7 +199,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
         const value = await manager.read(processId, { cursor, maxChars, waitMs });
         const payload = detail === "full" ? { device: deviceView(identity), ...value } : compactProcessRead(identity.name, value);
         return await contentResult(payload, images, value.process.cwd ?? process.cwd());
-      } catch (error) { return errorResult(error); }
+      } catch (error) { return errorResult(error, diagnostics, requestId, "process_read"); }
     }
   );
 
@@ -208,12 +217,12 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
         detail: detailSchema.describe("compact returns only changed/meaningful fields; full returns the legacy write result.")
       })
     },
-    async ({ processId, data, end, columns, rows, detail }) => handled(async () => {
+    async ({ processId, data, end, columns, rows, detail }) => handled("process_write", async () => {
       if ((columns === undefined) !== (rows === undefined)) throw new Error("columns and rows must be supplied together.");
       const resize = columns !== undefined && rows !== undefined ? { columns, rows } : undefined;
       const value = await manager.write(processId, data, end, resize);
       return detail === "full" ? { device: deviceView(identity), ...value } : compactProcessWrite(identity.name, value);
-    })
+    }, diagnostics, requestId)
   );
 
   server.registerTool(
@@ -227,10 +236,10 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
         detail: detailSchema.describe("compact confirms the stop and exit status; full returns the detailed final snapshot.")
       })
     },
-    async ({ processId, force, detail }) => handled(async () => {
+    async ({ processId, force, detail }) => handled("process_stop", async () => {
       const process = await manager.stop(processId, force);
       return detail === "full" ? { device: deviceView(identity), process } : compactProcessStop(identity.name, process);
-    })
+    }, diagnostics, requestId)
   );
 
   server.registerTool(

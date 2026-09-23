@@ -2,6 +2,13 @@
 
 DevRelay is intentionally small. Prefer using existing CLIs through the six MCP process tools over adding domain-specific MCP tools.
 
+## Agent execution guidance
+
+- Prefer fewer, larger MCP calls when several safe shell operations can be executed sequentially. Combine related checks and commands into one `exec` call instead of issuing many small `exec` calls.
+- Use `process_start` / `process_read` / `process_write` only when work genuinely needs a retained, long-running, or interactive process. Avoid switching between MCP tools when `exec` can complete the task cleanly.
+- Do not batch operations when a later step depends on interpreting earlier output, when user approval may be required between steps, or when combining commands would make destructive, privileged, or security-sensitive behavior harder to review.
+- If the MCP client reports `Resource not found` before a request reaches DevRelay, do not repeatedly retry tool calls or automatically restart DevRelay. Treat it as an upstream routing failure, refresh/reconnect the client connector or continue in a new session, and preserve the server logs for diagnosis.
+
 ## Design rules
 
 - Keep the MCP surface at six tools unless a genuinely new primitive cannot be expressed cleanly through the existing process tools.

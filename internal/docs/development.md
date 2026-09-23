@@ -17,8 +17,10 @@ Tests use Node's built-in `node:test`; there is no separate test framework. Type
 src/main.ts             CLI and lifecycle
 src/http-server.ts      Streamable HTTP adapter
 src/mcp-server.ts       MCP tool schemas and handlers
+src/diagnostics.ts      MCP request diagnostics and heartbeat
 src/process-manager.ts  child-process lifecycle and registry
 src/output-buffer.ts    rolling cursor-based output storage
+src/version.ts          package-version loader
 src/types.ts            shared process types
 test/                   Node test runner tests
 docs/                   design and usage documentation
@@ -50,4 +52,4 @@ The suite covers cursor buffering, direct executable execution, stdout/stderr ca
 
 ## Release checklist
 
-Run `npm run check`, `npm test`, the stdio Inspector `tools/list` smoke test, and the HTTP Inspector smoke test. Update the version in `package.json` and `src/main.ts`, then update `CHANGELOG.md`.
+Run `npm run check`, `npm test`, the stdio Inspector `tools/list` smoke test, and the HTTP Inspector smoke test. Update the version in `package.json`, then update `CHANGELOG.md`. Runtime/CLI version reporting reads that package version automatically.

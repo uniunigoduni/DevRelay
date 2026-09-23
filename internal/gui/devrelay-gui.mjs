@@ -192,7 +192,9 @@ function appendProcessOutput(target, chunk, level) {
     if (!line.trim()) continue;
     let resolved = level;
     if (level === "server") {
-      resolved = /\bERR\b|error=/i.test(line) ? "error" : /\bWRN\b|warning/i.test(line) ? "warn" : "info";
+      resolved = /\bERR\b|\[ERROR\]|fatal:/i.test(line) ? "error"
+        : /\bWRN\b|\bWARN(?:ING)?\b/i.test(line) ? "warn"
+        : /error=/i.test(line) ? "error" : "info";
     }
     pushLog(target, line, resolved);
   }

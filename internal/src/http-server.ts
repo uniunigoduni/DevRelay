@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { hostHeaderValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
+import { McpDiagnostics, inspectMcpRequest } from "./diagnostics.js";
 import { createDevRelayServer } from "./mcp-server.js";
 import { DevRelayOAuthServer } from "./oauth-server.js";
 import { ProcessManager } from "./process-manager.js";
 import type { DeviceIdentity } from "./device-identity.js";
+import { VERSION } from "./version.js";
 
 export interface HttpServerHandle {
   close(): Promise<void>;
@@ -25,8 +28,16 @@ async function createOAuthFromEnvironment(): Promise<DevRelayOAuthServer | undef
   }
   return await DevRelayOAuthServer.create({ issuer, resource, stateDir, controlSecret });
 }
+
 export async function serveHttp(manager: ProcessManager, identity: DeviceIdentity, host: string, port: number): Promise<HttpServerHandle> {
-  const handler = createMcpHandler(() => createDevRelayServer(manager, identity));
+  const diagnostics = new McpDiagnostics(VERSION, () => manager.list().filter((process) => process.running).length);
+  const handler = createMcpHandler(async (context) => {
+    const requestId = context.requestInfo?.headers.get("x-devrelay-request-id") ?? `r_${randomUUID()}`;
+    diagnostics.identifyRequest(requestId, await inspectMcpRequest(context.requestInfo));
+    return createDevRelayServer(manager, identity, { diagnostics, requestId });
+  }, {
+    onerror: (error) => diagnostics.reportError("mcp", error)
+  });
   const nodeHandler = toNodeHandler(handler);
   const validateOrigin = localhostOriginValidation();
   const localOnly = isLoopback(host);
@@ -36,9 +47,29 @@ export async function serveHttp(manager: ProcessManager, identity: DeviceIdentit
   const validateHost = hostHeaderValidation(allowedHosts);
 
   const httpServer = createHttpServer((request, response) => {
+    const requestId = `r_${randomUUID()}`;
+    request.headers["x-devrelay-request-id"] = requestId;
+    let mcpRequest = false;
+
     void (async () => {
-      if (localOnly && !validateHost(request, response)) return;
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (url.pathname === "/mcp") {
+        mcpRequest = true;
+        diagnostics.beginRequest(requestId, request.method ?? "UNKNOWN");
+        let responseFinished = false;
+        response.once("finish", () => {
+          responseFinished = true;
+          diagnostics.finishRequest(requestId, response);
+        });
+        response.once("close", () => {
+          if (!responseFinished) diagnostics.abortRequest(requestId, new Error("MCP response closed before completion."));
+        });
+      }
+
+      if (localOnly && !validateHost(request, response)) {
+        if (mcpRequest) diagnostics.markErrorCategory(requestId, "transport");
+        return;
+      }
 
       if (oauth && await oauth.handleRoute(request, response, url)) return;
 
@@ -48,10 +79,18 @@ export async function serveHttp(manager: ProcessManager, identity: DeviceIdentit
         return;
       }
 
-      if (localOnly && !validateOrigin(request, response)) return;
-      if (oauth && !oauth.authorizeMcp(request, response)) return;
+      if (localOnly && !validateOrigin(request, response)) {
+        diagnostics.markErrorCategory(requestId, "transport");
+        return;
+      }
+      if (oauth && !oauth.authorizeMcp(request, response)) {
+        diagnostics.markErrorCategory(requestId, "auth");
+        return;
+      }
       void nodeHandler(request, response);
     })().catch((error: unknown) => {
+      if (mcpRequest) diagnostics.reportError("internal", error, { requestId });
+      else diagnostics.reportError("internal", error);
       const message = error instanceof Error ? error.message : String(error);
       if (!response.headersSent) response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       if (!response.writableEnded) response.end(`Internal Server Error: ${message}\n`);
@@ -62,11 +101,13 @@ export async function serveHttp(manager: ProcessManager, identity: DeviceIdentit
     httpServer.listen(port, host, () => resolve());
   });
 
+  diagnostics.startHeartbeat();
   console.error(`[DevRelay] HTTP MCP listening on http://${host}:${port}/mcp`);
   if (oauth) console.error(`[DevRelay] OAuth 2.1 required for ${oauth.resource}`);
 
   return {
     async close() {
+      diagnostics.stop();
       await handler.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     }

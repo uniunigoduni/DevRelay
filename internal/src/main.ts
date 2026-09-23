@@ -5,8 +5,7 @@ import { serveHttp, type HttpServerHandle } from "./http-server.js";
 import { createDevRelayServer } from "./mcp-server.js";
 import { ProcessManager } from "./process-manager.js";
 import { loadDeviceIdentity } from "./device-identity.js";
-
-const VERSION = "0.2.0";
+import { VERSION } from "./version.js";
 
 type Transport = "stdio" | "http";
 

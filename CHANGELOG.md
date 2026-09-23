@@ -2,6 +2,17 @@
 
 All notable changes to DevRelay are documented here.
 
+## Unreleased
+
+### Added
+
+- Added MCP request diagnostics with per-request IDs, JSON-RPC method/tool identification, response timing, categorized errors, secret redaction, and a 30-minute runtime heartbeat in the Server log.
+
+### Fixed
+
+- Cloudflared `WRN` lines that contain an `error=` field are now shown as warnings instead of errors. Expected stateless MCP GET/DELETE 405 responses are recorded as normal protocol behavior.
+- CLI and MCP server versions now use the package version instead of stale hard-coded values.
+
 ## 0.3.0 - 2026-09-22
 
 ### Added
