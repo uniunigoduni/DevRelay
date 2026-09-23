@@ -47,6 +47,7 @@ function errorResult(error: unknown, diagnostics?: McpDiagnostics, requestId?: s
 }
 
 async function handled<T>(tool: string, fn: () => Promise<T> | T, diagnostics?: McpDiagnostics, requestId?: string) {
+  if (diagnostics && requestId) diagnostics.enterTool(requestId, tool);
   try {
     return textResult(await fn());
   } catch (error) {
@@ -151,6 +152,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
       })
     },
     async (input) => {
+      if (diagnostics && requestId) diagnostics.enterTool(requestId, "exec");
       try {
         const value = await manager.execute(toCommandSpec(input), {
           stdin: input.stdin, timeoutMs: input.timeoutMs, maxOutputChars: input.maxOutputChars
@@ -195,6 +197,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
       })
     },
     async ({ processId, cursor, maxChars, waitMs, images, detail }) => {
+      if (diagnostics && requestId) diagnostics.enterTool(requestId, "process_read");
       try {
         const value = await manager.read(processId, { cursor, maxChars, waitMs });
         const payload = detail === "full" ? { device: deviceView(identity), ...value } : compactProcessRead(identity.name, value);
@@ -253,6 +256,7 @@ export function createDevRelayServer(manager: ProcessManager, identity: DeviceId
       })
     },
     async ({ includeCompleted, detail }) => {
+      if (diagnostics && requestId) diagnostics.enterTool(requestId, "process_list");
       const processes = manager.list().filter((process) => includeCompleted || process.running);
       return detail === "full"
         ? textResult({ device: deviceView(identity), processes })

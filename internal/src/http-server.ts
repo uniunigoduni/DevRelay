@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer as createHttpServer } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { hostHeaderValidation, localhostOriginValidation, toNodeHandler } from "@modelcontextprotocol/node";
-import { McpDiagnostics, inspectMcpRequest } from "./diagnostics.js";
+import { McpDiagnostics, inspectMcpHeaders } from "./diagnostics.js";
 import { createDevRelayServer } from "./mcp-server.js";
 import { DevRelayOAuthServer } from "./oauth-server.js";
 import { ProcessManager } from "./process-manager.js";
@@ -31,9 +31,9 @@ async function createOAuthFromEnvironment(): Promise<DevRelayOAuthServer | undef
 
 export async function serveHttp(manager: ProcessManager, identity: DeviceIdentity, host: string, port: number): Promise<HttpServerHandle> {
   const diagnostics = new McpDiagnostics(VERSION, () => manager.list().filter((process) => process.running).length);
-  const handler = createMcpHandler(async (context) => {
+  const handler = createMcpHandler((context) => {
     const requestId = context.requestInfo?.headers.get("x-devrelay-request-id") ?? `r_${randomUUID()}`;
-    diagnostics.identifyRequest(requestId, await inspectMcpRequest(context.requestInfo));
+    diagnostics.routeRequest(requestId, context.era);
     return createDevRelayServer(manager, identity, { diagnostics, requestId });
   }, {
     onerror: (error) => diagnostics.reportError("mcp", error)
@@ -55,7 +55,11 @@ export async function serveHttp(manager: ProcessManager, identity: DeviceIdentit
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (url.pathname === "/mcp") {
         mcpRequest = true;
-        diagnostics.beginRequest(requestId, request.method ?? "UNKNOWN");
+        diagnostics.beginRequest(
+          requestId,
+          request.method ?? "UNKNOWN",
+          inspectMcpHeaders(request.headers["mcp-method"], request.headers["mcp-name"])
+        );
         let responseFinished = false;
         response.once("finish", () => {
           responseFinished = true;

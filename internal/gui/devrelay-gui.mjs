@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
+import { classifyGuiHeartbeat } from "./heartbeat-watchdog.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -94,6 +95,7 @@ let shuttingDown = false;
 let closeTimer = null;
 let windowLaunchedAt = 0;
 let lastHeartbeatAt = 0;
+let lastHeartbeatStatus = "healthy";
 let auditSeen = 0;
 let autoStartPending = settings.autoStart;
 let publicUrl = connectionPublicUrl(setup.connection);
@@ -537,10 +539,17 @@ process.on("unhandledRejection", (error) => {
 });
 setInterval(() => {
   if (shuttingDown || !windowLaunchedAt) return;
-  const now = Date.now();
-  if (now - windowLaunchedAt > 8000 && now - lastHeartbeatAt > 3000) {
+  const heartbeat = classifyGuiHeartbeat({ now: Date.now(), windowLaunchedAt, lastHeartbeatAt });
+  if (heartbeat.status === "stale" && lastHeartbeatStatus !== "stale") {
+    pushLog(pluginLogs, `[GUI] Heartbeat stale: no signal for ${heartbeat.ageMs}ms.`, "warn");
+  } else if (heartbeat.status === "healthy" && lastHeartbeatStatus === "stale") {
+    pushLog(pluginLogs, "[GUI] Heartbeat recovered.");
+  } else if (heartbeat.status === "lost") {
+    lastHeartbeatStatus = "lost";
     void shutdown("GUI heartbeat lost");
+    return;
   }
+  lastHeartbeatStatus = heartbeat.status;
 }, 1000).unref();
 
 server.on("error", (error) => {

@@ -10,6 +10,9 @@ export interface McpRequestSummary {
 interface RequestState extends McpRequestSummary {
   startedAt: number;
   httpMethod: string;
+  era?: "legacy" | "modern";
+  toolsListCounted?: boolean;
+  toolsCallCounted?: boolean;
   errorCategory?: DiagnosticCategory;
   errorCounted?: boolean;
 }
@@ -35,6 +38,19 @@ function redact(value: string): string {
 
 function errorMessage(error: unknown): string {
   return redact(error instanceof Error ? error.message : String(error));
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  const resolved = Array.isArray(value) ? value[0] : value;
+  const trimmed = resolved?.trim();
+  return trimmed || undefined;
+}
+
+export function inspectMcpHeaders(methodValue: string | string[] | undefined, nameValue: string | string[] | undefined): McpRequestSummary {
+  const method = firstHeader(methodValue);
+  if (!method) return { method: "unknown" };
+  const toolName = method === "tools/call" ? firstHeader(nameValue) : undefined;
+  return toolName ? { method, toolName } : { method };
 }
 
 function extractRpc(value: unknown, depth = 0): McpRequestSummary | null {
@@ -119,25 +135,32 @@ export class McpDiagnostics {
     this.heartbeatTimer = undefined;
   }
 
-  beginRequest(requestId: string, httpMethod = "UNKNOWN"): void {
+  beginRequest(requestId: string, httpMethod = "UNKNOWN", summary: McpRequestSummary = { method: "unknown" }): void {
     const now = this.now();
-    this.requests.set(requestId, { method: "unknown", httpMethod, startedAt: now });
+    const state: RequestState = { method: "unknown", httpMethod, startedAt: now };
+    this.requests.set(requestId, state);
+    this.applySummary(state, summary);
     this.counters.requests += 1;
     this.lastRequestAt = now;
+    this.output(`[MCP] request id=${requestId} http=${httpMethod} method=${state.method}${state.toolName ? ` tool=${state.toolName}` : ""}`);
   }
 
   identifyRequest(requestId: string, summary: McpRequestSummary): void {
     const state = this.requests.get(requestId);
-    if (state) Object.assign(state, summary);
-    const now = this.now();
-    if (summary.method === "tools/list") {
-      this.counters.toolsList += 1;
-      this.lastToolsListAt = now;
-    } else if (summary.method === "tools/call") {
-      this.counters.toolsCall += 1;
-      this.lastToolsCallAt = now;
-    }
-    this.output(`[MCP] request id=${requestId} method=${summary.method}${summary.toolName ? ` tool=${summary.toolName}` : ""}`);
+    if (!state) return;
+    this.applySummary(state, summary);
+  }
+
+  routeRequest(requestId: string, era: "legacy" | "modern"): void {
+    const state = this.requests.get(requestId);
+    if (state) state.era = era;
+    this.output(`[MCP] route id=${requestId} era=${era}`);
+  }
+
+  enterTool(requestId: string, tool: string): void {
+    const state = this.requests.get(requestId);
+    if (state) this.applySummary(state, { method: "tools/call", toolName: tool });
+    this.output(`[MCP] tool-enter id=${requestId} tool=${tool}`);
   }
 
   markErrorCategory(requestId: string, category: DiagnosticCategory): void {
@@ -150,21 +173,28 @@ export class McpDiagnostics {
     const elapsed = state ? this.now() - state.startedAt : 0;
     const method = state?.method ?? "unknown";
     const tool = state?.toolName ? ` tool=${state.toolName}` : "";
+    const era = state?.era ? ` era=${state.era}` : "";
     const expectedStatelessMethodRejection = response.statusCode === 405 && method === "unknown" &&
       (state?.httpMethod === "GET" || state?.httpMethod === "DELETE");
     if (response.statusCode >= 400 && !expectedStatelessMethodRejection) {
       const category = state?.errorCategory ?? (response.statusCode >= 500 ? "internal" : "mcp");
       if (!state?.errorCounted) this.countError(category);
-      this.output(`[ERROR][${category}] response id=${requestId} status=${response.statusCode} durationMs=${elapsed} method=${method}${tool}`);
+      this.output(`[ERROR][${category}] response id=${requestId} status=${response.statusCode} durationMs=${elapsed} method=${method}${tool}${era}`);
     } else {
       const expected = expectedStatelessMethodRejection ? " expected=true" : "";
       const resolvedMethod = expectedStatelessMethodRejection ? `HTTP_${state?.httpMethod}` : method;
-      this.output(`[MCP] response id=${requestId} status=${response.statusCode} durationMs=${elapsed} method=${resolvedMethod}${tool}${expected}`);
+      this.output(`[MCP] response id=${requestId} status=${response.statusCode} durationMs=${elapsed} method=${resolvedMethod}${tool}${era}${expected}`);
     }
     this.requests.delete(requestId);
   }
 
   abortRequest(requestId: string, error: unknown): void {
+    const state = this.requests.get(requestId);
+    if (state?.method === "subscriptions/listen") {
+      this.output(`[MCP] stream-closed id=${requestId} method=subscriptions/listen${state.era ? ` era=${state.era}` : ""} expected=true`);
+      this.requests.delete(requestId);
+      return;
+    }
     this.reportError("transport", error, { requestId });
     this.requests.delete(requestId);
   }
@@ -193,6 +223,21 @@ export class McpDiagnostics {
     this.output(line);
     this.counters = { requests: 0, toolsList: 0, toolsCall: 0, errors: 0, infrastructureErrors: 0 };
     return line;
+  }
+
+  private applySummary(state: RequestState, summary: McpRequestSummary): void {
+    if (summary.method !== "unknown") state.method = summary.method;
+    if (summary.toolName) state.toolName = summary.toolName;
+    const now = this.now();
+    if (state.method === "tools/list" && !state.toolsListCounted) {
+      state.toolsListCounted = true;
+      this.counters.toolsList += 1;
+      this.lastToolsListAt = now;
+    } else if (state.method === "tools/call" && !state.toolsCallCounted) {
+      state.toolsCallCounted = true;
+      this.counters.toolsCall += 1;
+      this.lastToolsCallAt = now;
+    }
   }
 
   private countError(category: DiagnosticCategory): void {

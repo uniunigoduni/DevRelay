@@ -52,7 +52,7 @@ Managed process metadata and buffered output live only in memory. Each visible n
 
 ## Visible control GUI
 
-The normal Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changing requests from other browser origins, and waits for a heartbeat from the visible app window before auto-starting DevRelay. Closing the GUI or losing its heartbeat stops the launcher-managed DevRelay/provider process tree. There is no tray/background-only mode in the normal launcher.
+The normal Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changing requests from other browser origins, and waits for a heartbeat from the visible app window before auto-starting DevRelay. A brief heartbeat stall is logged as a warning; sustained loss is required before the launcher-managed DevRelay/provider process tree is stopped. Closing the GUI host still stops the runtime immediately. There is no tray/background-only mode in the normal launcher.
 
 ## Multiple-device isolation
 

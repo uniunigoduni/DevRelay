@@ -55,7 +55,7 @@ MCP protocol handling belongs to the official SDK. DevRelay uses stdio or Stream
 
 ## HTTP diagnostics
 
-Streamable HTTP requests receive a local request ID before entering the MCP SDK. DevRelay records only protocol-level metadata needed for diagnosis: JSON-RPC method, tool name for `tools/call`, response status, and duration. Tool arguments and request bodies are not logged. Diagnostic lines go to the Server log; command audit events remain in the Command log.
+Streamable HTTP requests receive a local request ID before entering the MCP SDK. Modern requests are identified from the standard `Mcp-Method` / `Mcp-Name` headers before dispatch, the SDK factory records the negotiated `legacy` / `modern` era, and each tool handler records a `tool-enter` event. This keeps `tools/call` observable even when the SDK has already consumed the request body. DevRelay records only protocol-level metadata needed for diagnosis: method, tool name, era, response status, and duration. Tool arguments and request bodies are not logged. Diagnostic lines go to the Server log; command audit events remain in the Command log.
 
 The HTTP runtime emits a lightweight heartbeat every 30 minutes with uptime, request/tool-call counts for the preceding window, error count, active managed-process count, and the timestamps of the most recent MCP request, `tools/list`, and `tools/call`. The heartbeat uses already-observed local state and performs no external health probe.
 
