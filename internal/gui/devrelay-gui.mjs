@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
-import { classifyGuiHeartbeat } from "./heartbeat-watchdog.mjs";
+import { classifyGuiHostHeartbeat } from "./gui-host-watchdog.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -92,10 +92,10 @@ let runtime = null;
 let setupProcess = null;
 let windowHost = null;
 let shuttingDown = false;
-let closeTimer = null;
 let windowLaunchedAt = 0;
-let lastHeartbeatAt = 0;
-let lastHeartbeatStatus = "healthy";
+let lastHostHeartbeatAt = 0;
+let lastHostHeartbeatStatus = "healthy";
+let windowReady = false;
 let auditSeen = 0;
 let autoStartPending = settings.autoStart;
 let publicUrl = connectionPublicUrl(setup.connection);
@@ -179,6 +179,7 @@ function snapshot() {
     connectionLabel: connectionLabel(setup.connection),
     setupComplete: setup.completed,
     setupOpen: setupProcess !== null,
+    windowReady,
     sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
@@ -379,16 +380,22 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/app.js") return void await serveStatic(res, "app.js", "text/javascript; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/styles.css") return void await serveStatic(res, "styles.css", "text/css; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/api/state") {
+      if (req.headers["x-devrelay-gui-host"] === "wpf") lastHostHeartbeatAt = Date.now();
       await refreshSetupFromDisk();
       return sendJson(res, 200, snapshot());
     }
 
     if (req.method === "POST" && url.pathname === "/api/start") {
+      if (!windowReady || lastHostHeartbeatStatus === "lost") {
+        return sendJson(res, 409, { error: "The visible GUI host is not ready." });
+      }
       await startRuntime();
       return sendJson(res, 202, snapshot());
     }
     if (req.method === "POST" && url.pathname === "/api/stop") {
-      await stopRuntime("button");
+      const body = await readJson(req);
+      const reason = body.reason === "window closed" ? "window closed" : "button";
+      await stopRuntime(reason);
       return sendJson(res, 200, snapshot());
     }
     if (req.method === "POST" && url.pathname === "/api/oauth/decision") {
@@ -452,21 +459,15 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 202, snapshot());
     }
 
-    if (req.method === "POST" && url.pathname === "/api/heartbeat") {
-      lastHeartbeatAt = Date.now();
+    if (req.method === "POST" && url.pathname === "/api/window-ready") {
+      windowReady = true;
+      lastHostHeartbeatAt = Date.now();
+      lastHostHeartbeatStatus = "healthy";
       if (autoStartPending) {
         autoStartPending = false;
         void startRuntime();
       }
-      if (closeTimer) {
-        clearTimeout(closeTimer);
-        closeTimer = null;
-      }
       return sendJson(res, 200, { ok: true });
-    }
-    if (req.method === "POST" && url.pathname === "/api/window-close") {
-      scheduleWindowClose();
-      return sendJson(res, 202, { ok: true });
     }
 
     res.writeHead(404).end();
@@ -474,14 +475,6 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 });
-function scheduleWindowClose() {
-  if (closeTimer || shuttingDown) return;
-  closeTimer = setTimeout(() => {
-    closeTimer = null;
-    void shutdown("window closed");
-  }, 1400);
-}
-
 function runPowerShellFile(filePath, args = []) {
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", [
@@ -498,15 +491,22 @@ async function launchWindow() {
   const profile = path.join(stateDir, "webview2-profile");
   const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
-  lastHeartbeatAt = 0;
+  lastHostHeartbeatAt = 0;
+  lastHostHeartbeatStatus = "healthy";
+  windowReady = false;
   const hostArgs = [
     "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta",
     "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile, "-WindowStatePath", windowStatePath
   ];
   if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", setupWindowStatePath);
-  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: "ignore" });
+  windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  windowHost.stdout.setEncoding("utf8");
+  windowHost.stderr.setEncoding("utf8");
+  windowHost.stdout.on("data", (chunk) => appendProcessOutput(pluginLogs, chunk, "server"));
+  windowHost.stderr.on("data", (chunk) => appendProcessOutput(pluginLogs, chunk, "server"));
   windowHost.once("exit", () => {
     windowHost = null;
+    windowReady = false;
     if (!shuttingDown) void shutdown("GUI window closed");
   });
   windowHost.once("error", (error) => {
@@ -518,7 +518,6 @@ async function launchWindow() {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (closeTimer) clearTimeout(closeTimer);
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
   await stopRuntime(reason);
   await persistSessionMeta({ endedAt: new Date().toISOString(), status: "closed", exitReason: reason });
@@ -538,18 +537,19 @@ process.on("unhandledRejection", (error) => {
   pushLog(pluginLogs, `[GUI] Rejection: ${String(error)}`, "error");
 });
 setInterval(() => {
-  if (shuttingDown || !windowLaunchedAt) return;
-  const heartbeat = classifyGuiHeartbeat({ now: Date.now(), windowLaunchedAt, lastHeartbeatAt });
-  if (heartbeat.status === "stale" && lastHeartbeatStatus !== "stale") {
-    pushLog(pluginLogs, `[GUI] Heartbeat stale: no signal for ${heartbeat.ageMs}ms.`, "warn");
-  } else if (heartbeat.status === "healthy" && lastHeartbeatStatus === "stale") {
-    pushLog(pluginLogs, "[GUI] Heartbeat recovered.");
-  } else if (heartbeat.status === "lost") {
-    lastHeartbeatStatus = "lost";
-    void shutdown("GUI heartbeat lost");
-    return;
+  if (shuttingDown || !windowLaunchedAt || !windowReady) return;
+  const heartbeat = classifyGuiHostHeartbeat({ now: Date.now(), windowLaunchedAt, lastHeartbeatAt: lastHostHeartbeatAt });
+  if (heartbeat.status === "stale" && lastHostHeartbeatStatus === "healthy") {
+    pushLog(pluginLogs, `[GUI] Host heartbeat stale: no native GUI signal for ${heartbeat.ageMs}ms.`, "warn");
+  } else if (heartbeat.status === "healthy" && lastHostHeartbeatStatus !== "healthy") {
+    pushLog(pluginLogs, "[GUI] Host heartbeat recovered. Runtime remains stopped until explicitly started.");
+  } else if (heartbeat.status === "lost" && lastHostHeartbeatStatus !== "lost") {
+    pushLog(pluginLogs, `[GUI] Host heartbeat lost after ${heartbeat.ageMs}ms; stopping runtime without closing the controller.`, "warn");
+    void stopRuntime("GUI host heartbeat lost").catch((error) => {
+      pushLog(pluginLogs, `[GUI] Failed to stop runtime after GUI host heartbeat loss: ${error.message}`, "error");
+    });
   }
-  lastHeartbeatStatus = heartbeat.status;
+  lastHostHeartbeatStatus = heartbeat.status;
 }, 1000).unref();
 
 server.on("error", (error) => {

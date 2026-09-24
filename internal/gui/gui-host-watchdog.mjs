@@ -1,14 +1,14 @@
-export const GUI_HEARTBEAT_STARTUP_GRACE_MS = 8_000;
-export const GUI_HEARTBEAT_WARN_AFTER_MS = 5_000;
-export const GUI_HEARTBEAT_SHUTDOWN_AFTER_MS = 20_000;
+export const GUI_HOST_HEARTBEAT_STARTUP_GRACE_MS = 8_000;
+export const GUI_HOST_HEARTBEAT_WARN_AFTER_MS = 5_000;
+export const GUI_HOST_HEARTBEAT_STOP_AFTER_MS = 20_000;
 
-export function classifyGuiHeartbeat({
+export function classifyGuiHostHeartbeat({
   now = Date.now(),
   windowLaunchedAt,
   lastHeartbeatAt,
-  startupGraceMs = GUI_HEARTBEAT_STARTUP_GRACE_MS,
-  warnAfterMs = GUI_HEARTBEAT_WARN_AFTER_MS,
-  shutdownAfterMs = GUI_HEARTBEAT_SHUTDOWN_AFTER_MS
+  startupGraceMs = GUI_HOST_HEARTBEAT_STARTUP_GRACE_MS,
+  warnAfterMs = GUI_HOST_HEARTBEAT_WARN_AFTER_MS,
+  stopAfterMs = GUI_HOST_HEARTBEAT_STOP_AFTER_MS
 }) {
   if (!windowLaunchedAt) return { status: "healthy", ageMs: 0 };
 
@@ -19,7 +19,7 @@ export function classifyGuiHeartbeat({
   if (!lastHeartbeatAt && sinceLaunch <= startupGraceMs) {
     return { status: "healthy", ageMs };
   }
-  if (ageMs > shutdownAfterMs) return { status: "lost", ageMs };
+  if (ageMs > stopAfterMs) return { status: "lost", ageMs };
   if (ageMs > warnAfterMs) return { status: "stale", ageMs };
   return { status: "healthy", ageMs };
 }

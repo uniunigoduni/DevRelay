@@ -315,13 +315,6 @@ saveSettings.addEventListener("click", async () => {
 });
 
 setInterval(() => { void refresh(); }, 500);
-setInterval(() => {
-  void fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => {});
-}, 550);
-
-window.addEventListener("pagehide", () => {
-  navigator.sendBeacon("/api/window-close", "");
-});
 
 void refresh();
 

@@ -10,9 +10,11 @@ All notable changes to DevRelay are documented here.
 
 ### Fixed
 
+- GUI liveness is now owned by the native WPF host instead of a JavaScript timer inside WebView2. Auto-start waits for a native window-ready signal, sustained host-liveness loss follows the normal runtime Stop path without closing the controller, and closing the GUI stops the runtime before the controller exits.
+- WebView2 process/navigation failures now recover the frontend independently (reload, renavigate, then control recreation) instead of taking the MCP runtime and tunnel down with the renderer.
+
 - Cloudflared `WRN` lines that contain an `error=` field are now shown as warnings instead of errors. Expected stateless MCP GET/DELETE 405 responses and normal subscription-stream closes are recorded as normal protocol behavior.
 - MCP diagnostics now identify modern requests from the standard `Mcp-Method` / `Mcp-Name` headers, record the negotiated protocol era, and record tool-handler entry so `tools/call` remains observable even after the SDK has consumed the request body.
-- The visible GUI heartbeat now warns after a short stall and waits for sustained loss before stopping the runtime, avoiding shutdowns caused by brief WebView2 pauses.
 - CLI and MCP server versions now use the package version instead of stale hard-coded values.
 
 ## 0.3.0 - 2026-09-22

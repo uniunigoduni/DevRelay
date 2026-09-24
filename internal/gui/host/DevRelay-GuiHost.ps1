@@ -254,7 +254,8 @@ if (Test-Path -LiteralPath $iconPath) {
     $window.Icon = $icon
   } catch { Write-Host "[GuiHost] Window icon load failed: $($_.Exception.Message)" }
 }
-$web = $window.FindName("WebView")
+$script:web = $window.FindName("WebView")
+$script:webParent = $script:web.Parent
 $titleBar = $window.FindName("TitleBar")
 $titleText = $window.FindName("TitleText")
 $powerButton = $window.FindName("PowerButton")
@@ -270,12 +271,16 @@ if ($SetupMode) {
 }
 $brushConverter = New-Object Windows.Media.BrushConverter
 function Brush([string]$Color) { return $brushConverter.ConvertFromString($Color) }
-function Resource-Brush([string]$Name, [string]$Color) { $window.Resources[$Name] = Brush $Color }$origin = ([Uri]$Url).GetLeftPart([UriPartial]::Authority)
+function Resource-Brush([string]$Name, [string]$Color) { $window.Resources[$Name] = Brush $Color }
+$origin = ([Uri]$Url).GetLeftPart([UriPartial]::Authority)
 $script:lastState = $null
 $script:busy = $false
 $script:theme = ""
 $script:setupRuntimeVisible = $false
 $script:lastOAuthPendingId = ""
+$script:frontendRecoveryLevel = 0
+$script:frontendRecreateAttempts = 0
+$script:frontendRecoveryBusy = $false
 
 function Show-DevRelayWindowForeground {
   try {
@@ -289,8 +294,22 @@ function Show-DevRelayWindowForeground {
   } catch {}
 }
 
+function Set-WebViewBackground {
+  if ($null -eq $script:web) { return }
+  try {
+    $script:web.DefaultBackgroundColor = if ($script:theme -eq "black-soft") {
+      [System.Drawing.Color]::Black
+    } else {
+      [System.Drawing.Color]::White
+    }
+  } catch {}
+}
+
 function Apply-Theme([string]$Theme) {
-  if ($Theme -eq $script:theme) { return }
+  if ($Theme -eq $script:theme) {
+    Set-WebViewBackground
+    return
+  }
   $script:theme = $Theme
   if ($Theme -eq "black-soft") {
     Resource-Brush "WindowBackgroundBrush" "#000000"
@@ -299,7 +318,6 @@ function Apply-Theme([string]$Theme) {
     Resource-Brush "BorderBrush" "#3A3A3A"
     Resource-Brush "SurfaceHoverBrush" "#181818"
     Resource-Brush "SurfacePressedBrush" "#282828"
-    $web.DefaultBackgroundColor = [System.Drawing.Color]::Black
   } else {
     Resource-Brush "WindowBackgroundBrush" "#FFFFFF"
     Resource-Brush "TextPrimaryBrush" "#2B2B2B"
@@ -307,33 +325,137 @@ function Apply-Theme([string]$Theme) {
     Resource-Brush "BorderBrush" "#D4D4D4"
     Resource-Brush "SurfaceHoverBrush" "#F2F2F2"
     Resource-Brush "SurfacePressedBrush" "#E5E5E5"
-    $web.DefaultBackgroundColor = [System.Drawing.Color]::White
+  }
+  Set-WebViewBackground
+}
+
+function New-WebViewCreationProperties {
+  $creation = New-Object Microsoft.Web.WebView2.Wpf.CoreWebView2CreationProperties
+  $creation.UserDataFolder = $ProfileDir
+  return $creation
+}
+
+function Invoke-FrontendRecovery([string]$Reason, [bool]$ForceRecreate = $false) {
+  if ($script:frontendRecoveryBusy) { return }
+  $script:frontendRecoveryBusy = $true
+  try {
+    if ($ForceRecreate) {
+      if ($script:frontendRecreateAttempts -ge 3) {
+        Write-Host "[GuiHost] Frontend recovery exhausted after repeated WebView2 recreation failures: $Reason"
+        return
+      }
+      $script:frontendRecreateAttempts++
+      Write-Host "[GuiHost] Frontend recovery: recreating WebView2 ($Reason)."
+      Recreate-WebView
+      return
+    }
+
+    $script:frontendRecoveryLevel++
+    if ($script:frontendRecoveryLevel -eq 1 -and $null -ne $script:web.CoreWebView2) {
+      Write-Host "[GuiHost] Frontend recovery: reloading WebView2 ($Reason)."
+      $script:web.CoreWebView2.Reload()
+      return
+    }
+    if ($script:frontendRecoveryLevel -eq 2 -and $null -ne $script:web.CoreWebView2) {
+      Write-Host "[GuiHost] Frontend recovery: navigating to the local UI again ($Reason)."
+      $script:web.CoreWebView2.Navigate($Url)
+      return
+    }
+
+    if ($script:frontendRecreateAttempts -ge 3) {
+      Write-Host "[GuiHost] Frontend recovery exhausted after repeated WebView2 recreation failures: $Reason"
+      return
+    }
+    $script:frontendRecreateAttempts++
+    $script:frontendRecoveryLevel = 0
+    Write-Host "[GuiHost] Frontend recovery: recreating WebView2 after reload/navigation attempts ($Reason)."
+    Recreate-WebView
+  } catch {
+    Write-Host "[GuiHost] Frontend recovery step failed: $($_.Exception.Message)"
+    if ($script:frontendRecreateAttempts -lt 3) {
+      try {
+        $script:frontendRecreateAttempts++
+        $script:frontendRecoveryLevel = 0
+        Recreate-WebView
+      } catch {
+        Write-Host "[GuiHost] WebView2 recreation failed: $($_.Exception.Message)"
+      }
+    }
+  } finally {
+    $script:frontendRecoveryBusy = $false
   }
 }
 
-$creation = New-Object Microsoft.Web.WebView2.Wpf.CoreWebView2CreationProperties
-$creation.UserDataFolder = $ProfileDir
-$web.CreationProperties = $creation
-$web.add_CoreWebView2InitializationCompleted({
-  param($sender, $eventArgs)
-  if ($eventArgs.IsSuccess -and $null -ne $sender.CoreWebView2) {
-    $sender.CoreWebView2.Settings.AreDefaultContextMenusEnabled = $false
-    $sender.CoreWebView2.Settings.AreDevToolsEnabled = $false
-    $sender.CoreWebView2.Settings.IsStatusBarEnabled = $false
-    $sender.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = $false
-    $sender.CoreWebView2.Navigate($Url)
-  } else {
-    Write-Host "[GuiHost] WebView2 init failed: $($eventArgs.InitializationException)"
+function Queue-FrontendRecovery([string]$Reason, [bool]$ForceRecreate = $false) {
+  $action = {
+    Invoke-FrontendRecovery -Reason $Reason -ForceRecreate $ForceRecreate
+  }.GetNewClosure()
+  [void]$window.Dispatcher.BeginInvoke([Action]$action)
+}
+
+function Register-WebViewControl([Microsoft.Web.WebView2.Wpf.WebView2]$Control) {
+  $Control.CreationProperties = New-WebViewCreationProperties
+  $Control.add_CoreWebView2InitializationCompleted({
+    param($sender, $eventArgs)
+    if ($eventArgs.IsSuccess -and $null -ne $sender.CoreWebView2) {
+      $sender.CoreWebView2.Settings.AreDefaultContextMenusEnabled = $false
+      $sender.CoreWebView2.Settings.AreDevToolsEnabled = $false
+      $sender.CoreWebView2.Settings.IsStatusBarEnabled = $false
+      $sender.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = $false
+      $sender.CoreWebView2.add_ProcessFailed({
+        param($coreSender, $failedArgs)
+        $kind = [string]$failedArgs.ProcessFailedKind
+        Write-Host "[GuiHost] WebView2 process failed: $kind"
+        Queue-FrontendRecovery -Reason "process failed: $kind" -ForceRecreate ($kind -eq "BrowserProcessExited")
+      })
+      $sender.CoreWebView2.add_NavigationCompleted({
+        param($coreSender, $navigationArgs)
+        if ($navigationArgs.IsSuccess) {
+          $script:frontendRecoveryLevel = 0
+          $script:frontendRecreateAttempts = 0
+          return
+        }
+        Write-Host "[GuiHost] WebView2 navigation failed: $($navigationArgs.WebErrorStatus)"
+        Queue-FrontendRecovery -Reason "navigation failed: $($navigationArgs.WebErrorStatus)"
+      })
+      $sender.CoreWebView2.Navigate($Url)
+    } else {
+      Write-Host "[GuiHost] WebView2 init failed: $($eventArgs.InitializationException)"
+      Queue-FrontendRecovery -Reason "initialization failed" -ForceRecreate $true
+    }
+  })
+}
+
+function Recreate-WebView {
+  $oldWeb = $script:web
+  if ($null -ne $oldWeb) {
+    try { [void]$script:webParent.Children.Remove($oldWeb) } catch {}
+    try { $oldWeb.Dispose() } catch {}
   }
-})
+
+  $replacement = New-Object Microsoft.Web.WebView2.Wpf.WebView2
+  $replacement.Margin = New-Object Windows.Thickness -ArgumentList 6, 0, 6, 6
+  [Windows.Controls.Grid]::SetRow($replacement, 1)
+  $script:web = $replacement
+  Set-WebViewBackground
+  Register-WebViewControl $replacement
+  [void]$script:webParent.Children.Add($replacement)
+  if ($window.IsLoaded) {
+    try { [void]$replacement.EnsureCoreWebView2Async() }
+    catch { Write-Host "[GuiHost] Recreated WebView2 initialization failed: $($_.Exception.Message)" }
+  }
+}
+
+Register-WebViewControl $script:web
 $window.Add_Loaded({
-  try { [void]$web.EnsureCoreWebView2Async() }
+  try { [void]$script:web.EnsureCoreWebView2Async() }
   catch { Write-Host "[GuiHost] EnsureCoreWebView2Async failed: $($_.Exception.Message)" }
 })
 
 function Refresh-State {
   try {
-    $state = Invoke-RestMethod -Uri "$origin/api/state" -Method Get -TimeoutSec 1
+    $headers = if ($SetupMode) { @{} } else { @{ "X-DevRelay-Gui-Host" = "wpf" } }
+    $state = Invoke-RestMethod -Uri "$origin/api/state" -Method Get -Headers $headers -TimeoutSec 1
     $script:lastState = $state
     Apply-Theme ([string]$state.theme)
     if ($SetupMode) {
@@ -374,7 +496,7 @@ $powerButton.Add_Click({
 })
 
 $settingsButton.Add_Click({
-  try { [void]$web.ExecuteScriptAsync("window.DevRelayUi && window.DevRelayUi.toggleSettings && window.DevRelayUi.toggleSettings();") }
+  try { [void]$script:web.ExecuteScriptAsync("window.DevRelayUi && window.DevRelayUi.toggleSettings && window.DevRelayUi.toggleSettings();") }
   catch {}
 })
 $minButton.Add_Click({ [System.Windows.SystemCommands]::MinimizeWindow($window) })
@@ -445,7 +567,18 @@ $window.Add_LocationChanged({
     $windowSizeTimer.Start()
   }
 })
-$window.Add_Closing({ $windowSizeTimer.Stop(); Save-WindowSize })
+$window.Add_Closing({
+  $windowSizeTimer.Stop()
+  Save-WindowSize
+  if (-not $SetupMode) {
+    try {
+      Invoke-RestMethod -Uri "$origin/api/stop" -Method Post -Headers @{ Origin = $origin } `
+        -ContentType "application/json" -Body '{"reason":"window closed"}' -TimeoutSec 4 | Out-Null
+    } catch {
+      Write-Host "[GuiHost] Runtime stop on window close failed: $($_.Exception.Message)"
+    }
+  }
+})
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(500)
@@ -453,6 +586,14 @@ $timer.Add_Tick({ Refresh-State })
 $window.Add_ContentRendered({
   Show-DevRelayWindowForeground
   Save-WindowSize
+  if (-not $SetupMode) {
+    try {
+      Invoke-RestMethod -Uri "$origin/api/window-ready" -Method Post -Headers @{ Origin = $origin } `
+        -ContentType "application/json" -Body "{}" -TimeoutSec 2 | Out-Null
+    } catch {
+      Write-Host "[GuiHost] Window-ready signal failed: $($_.Exception.Message)"
+    }
+  }
   Refresh-State
   $timer.Start()
 })

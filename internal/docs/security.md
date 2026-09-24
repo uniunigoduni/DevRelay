@@ -52,7 +52,7 @@ Managed process metadata and buffered output live only in memory. Each visible n
 
 ## Visible control GUI
 
-The normal Windows GUI controller binds only to `127.0.0.1:7318`, rejects state-changing requests from other browser origins, and waits for a heartbeat from the visible app window before auto-starting DevRelay. A brief heartbeat stall is logged as a warning; sustained loss is required before the launcher-managed DevRelay/provider process tree is stopped. Closing the GUI host still stops the runtime immediately. There is no tray/background-only mode in the normal launcher.
+The normal Windows GUI controller binds only to `127.0.0.1:7318` and rejects state-changing requests from other browser origins. Auto-start is gated on a native WPF `window-ready` signal, and GUI liveness is derived from the WPF host state poll rather than JavaScript running inside WebView2. A brief native-host heartbeat stall is logged as a warning; sustained loss stops the launcher-managed DevRelay/provider runtime through the same stop path used by the visible Start/Stop control, while leaving the controller available for recovery. WebView2 renderer failures are recovered independently without stopping the runtime. Closing the GUI host invokes the stop path and then closes the controller. There is no tray/background-only mode in the normal launcher.
 
 ## Multiple-device isolation
 
