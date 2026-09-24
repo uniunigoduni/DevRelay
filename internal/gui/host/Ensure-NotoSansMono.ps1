@@ -24,7 +24,8 @@ $installedPath = Join-Path $userFonts "NotoSansMono-Variable.ttf"
 Copy-Item -LiteralPath $fontPath -Destination $installedPath -Force
 $fontKey = "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
 New-Item -Path $fontKey -Force | Out-Null
-New-ItemProperty -Path $fontKey -Name "Noto Sans Mono (TrueType)" -Value $installedPath -PropertyType String -Force | Out-NullAdd-Type @'
+New-ItemProperty -Path $fontKey -Name "Noto Sans Mono (TrueType)" -Value $installedPath -PropertyType String -Force | Out-Null
+Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class DevRelayFontBroadcast {
