@@ -52,7 +52,7 @@ test("heartbeat reports window counters and resets them", () => {
 
   const first = diagnostics.emitHeartbeat();
   assert.match(first, /status=healthy/);
-  assert.match(first, /version=0\.3\.0/);
+  assert.ok(first.includes(`version=${VERSION}`));
   assert.match(first, /requests_30m=1/);
   assert.match(first, /tools_list_30m=1/);
   assert.match(first, /tools_call_30m=0/);

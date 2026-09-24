@@ -112,6 +112,8 @@ const state = {
 
 const aiLogs = [];
 const pluginLogs = [];
+let aiLogRevision = 0;
+let pluginLogRevision = 0;
 const MAX_LOG_LINES = 900;
 
 async function readDeviceInfo() {
@@ -126,6 +128,8 @@ function pushLog(target, message, level = "info") {
   if (!text) return;
   const at = new Date().toISOString();
   target.push({ at, level, text });
+  if (target === aiLogs) aiLogRevision += 1;
+  else if (target === pluginLogs) pluginLogRevision += 1;
   if (target.length > MAX_LOG_LINES) target.splice(0, target.length - MAX_LOG_LINES);
   const logPath = target === aiLogs ? commandLogPath : target === pluginLogs ? serverLogPath : null;
   if (logPath) appendFileSync(logPath, `${at} [${String(level).toUpperCase()}] ${text.replace(/\r?\n/g, "\\n")}\n`, "utf8");
@@ -185,6 +189,8 @@ function snapshot() {
     publicUrl,
     device: deviceInfo ? { ...deviceInfo, online: state.running } : null,
     oauthPending,
+    aiLogRevision,
+    pluginLogRevision,
     aiLogs,
     pluginLogs
   };

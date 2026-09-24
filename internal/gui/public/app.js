@@ -26,8 +26,8 @@ const denyOAuth = $("#denyOAuth");
 
 let lastOAuthPendingId = null;
 let lastState = null;
-let lastAiCount = -1;
-let lastPluginCount = -1;
+let lastAiRevision = -1;
+let lastPluginRevision = -1;
 let requestBusy = false;
 let settingsDirty = false;
 
@@ -201,13 +201,13 @@ function render(state) {
     oauthMessage.classList.remove("error");
   }
 
-  if (state.aiLogs.length !== lastAiCount) {
+  if (state.aiLogRevision !== lastAiRevision) {
     renderLog(aiLog, state.aiLogs, "No commands yet.");
-    lastAiCount = state.aiLogs.length;
+    lastAiRevision = state.aiLogRevision;
   }
-  if (state.pluginLogs.length !== lastPluginCount) {
+  if (state.pluginLogRevision !== lastPluginRevision) {
     renderLog(pluginLog, state.pluginLogs, "Waiting for server output.");
-    lastPluginCount = state.pluginLogs.length;
+    lastPluginRevision = state.pluginLogRevision;
   }
 }
 

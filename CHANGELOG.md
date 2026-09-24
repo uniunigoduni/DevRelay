@@ -2,7 +2,7 @@
 
 All notable changes to DevRelay are documented here.
 
-## Unreleased
+## 0.4.0 - 2026-09-25
 
 ### Added
 
@@ -10,6 +10,7 @@ All notable changes to DevRelay are documented here.
 
 ### Fixed
 
+- Command and Server log panes now track monotonic log revisions instead of array length, so both continue refreshing after their 900-line rolling buffers are full.
 - GUI liveness is now owned by the native WPF host instead of a JavaScript timer inside WebView2. Auto-start waits for a native window-ready signal, sustained host-liveness loss follows the normal runtime Stop path without closing the controller, and closing the GUI stops the runtime before the controller exits.
 - WebView2 process/navigation failures now recover the frontend independently (reload, renavigate, then control recreation) instead of taking the MCP runtime and tunnel down with the renderer.
 
@@ -42,7 +43,7 @@ All notable changes to DevRelay are documented here.
 
 - Added `DevRelay.cmd` as the single user-facing Windows launcher; connection mode is selected and persisted in GUI Settings.
 - Added a compact custom-framed WPF/WebView2 control GUI with title-bar Start/Stop control.
-- Added separate `Command log` and `Server log` views with a default 780×560 layout.
+- Added separate `Command log` and `Server log` views with a default 780ﾃ・60 layout.
 - Added a gear-triggered settings panel for connection mode, MCP port, and launch-time auto-start.
 - Added command audit events for `exec` and managed processes without recording stdin contents.
 - Added Cloudflare Named Tunnel support with a fixed hostname and machine-local configuration.
