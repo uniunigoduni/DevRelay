@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 import { classifyGuiHostHeartbeat } from "./gui-host-watchdog.mjs";
+import { queryRecentWindowsEvents, queryWindowsProcesses, recoverUncleanSessions } from "./session-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -27,6 +28,8 @@ const hostScriptPath = path.join(hostDir, "DevRelay-GuiHost.ps1");
 const webView2Root = path.join(stateDir, "webview2-sdk");
 const fontRoot = path.join(stateDir, "fonts");
 const logsRoot = path.join(stateDir, "logs");
+const CONTROLLER_HEARTBEAT_INTERVAL_MS = 120_000;
+const controllerStartedAt = new Date().toISOString();
 
 async function existingGuiIsRunning() {
   return new Promise((resolve) => {
@@ -42,6 +45,7 @@ if (await existingGuiIsRunning()) process.exit(0);
 
 await mkdir(stateDir, { recursive: true });
 await mkdir(logsRoot, { recursive: true });
+const recoveredSessions = await recoverUncleanSessions({ logsRoot, internalRoot });
 
 let setup = await ensureSetupState(internalRoot);
 if (!setup.completed) {
@@ -68,26 +72,61 @@ const auditPath = path.join(sessionDir, "audit.ndjson");
 const commandLogPath = path.join(sessionDir, "command.log");
 const serverLogPath = path.join(sessionDir, "server.log");
 const sessionPath = path.join(sessionDir, "session.json");
+const lifecyclePath = path.join(sessionDir, "lifecycle.ndjson");
 await writeFile(auditPath, "", "utf8");
 await writeFile(commandLogPath, "", "utf8");
 await writeFile(serverLogPath, "", "utf8");
+await writeFile(lifecyclePath, "", "utf8");
 
 async function pruneLogSessions() {
   const pattern = /^\d{8}-\d{6}-[0-9a-f]{8}$/i;
   const entries = await readdir(logsRoot, { withFileTypes: true });
   const sessions = entries.filter((entry) => entry.isDirectory() && pattern.test(entry.name)).map((entry) => entry.name).sort().reverse();
-  const keep = new Set([sessionName, ...sessions.filter((name) => name !== sessionName).slice(0, 2)]);
+  const previous = sessions.filter((name) => name !== sessionName);
+  const keep = new Set([sessionName, ...previous.slice(0, 2)]);
+  const diagnosticSessions = [];
+  for (const name of previous) {
+    try {
+      const dir = path.join(logsRoot, name);
+      const [metaText, files] = await Promise.all([
+        readFile(path.join(dir, "session.json"), "utf8").catch(() => "{}"),
+        readdir(dir).catch(() => [])
+      ]);
+      const meta = JSON.parse(metaText);
+      const abnormalExit = meta.status === "unclean" || (meta.exitReason && !["GUI window closed", "SIGINT", "SIGTERM"].includes(meta.exitReason));
+      if (abnormalExit || files.some((file) => file.startsWith("diagnostic-") && file.endsWith(".json"))) diagnosticSessions.push(name);
+    } catch { /* malformed old session metadata is not retention-critical */ }
+  }
+  for (const name of diagnosticSessions.slice(0, 5)) keep.add(name);
   await Promise.all(sessions.filter((name) => !keep.has(name)).map((name) => rm(path.join(logsRoot, name), { recursive: true, force: true })));
 }
 await pruneLogSessions();
 
 let settings = await loadSettings();
-let sessionMeta = { sessionId, startedAt: new Date().toISOString(), endedAt: null, status: "window-open", exitReason: null, connection: connectionLabel(setup.connection), theme: settings.theme };
+let sessionMeta = {
+  sessionId,
+  startedAt: controllerStartedAt,
+  endedAt: null,
+  status: "window-open",
+  exitReason: null,
+  connection: connectionLabel(setup.connection),
+  theme: settings.theme,
+  controller: { role: "controller", pid: process.pid, parentPid: process.ppid, startedAt: controllerStartedAt, executableName: path.basename(process.execPath), commandIncludes: ["devrelay-gui.mjs"] },
+  windowHost: null,
+  launcher: null,
+  lastHeartbeatAt: controllerStartedAt
+};
 async function persistSessionMeta(values = {}) {
   sessionMeta = { ...sessionMeta, ...values };
   await writeFile(sessionPath, `${JSON.stringify(sessionMeta, null, 2)}\n`, "utf8");
 }
+function recordLifecycle(event, detail = {}) {
+  try {
+    appendFileSync(lifecyclePath, `${JSON.stringify({ at: new Date().toISOString(), event, controllerPid: process.pid, parentPid: process.ppid, ...detail })}\n`, "utf8");
+  } catch { /* lifecycle logging must never take the controller down */ }
+}
 await persistSessionMeta();
+recordLifecycle("controller.start", { sessionId, recoveredSessionCount: recoveredSessions.length });
 let runtime = null;
 let setupProcess = null;
 let windowHost = null;
@@ -96,6 +135,7 @@ let windowLaunchedAt = 0;
 let lastHostHeartbeatAt = 0;
 let lastHostHeartbeatStatus = "healthy";
 let windowReady = false;
+let windowCloseRequestedAt = 0;
 let auditSeen = 0;
 let autoStartPending = settings.autoStart;
 let publicUrl = connectionPublicUrl(setup.connection);
@@ -133,6 +173,39 @@ function pushLog(target, message, level = "info") {
   if (target.length > MAX_LOG_LINES) target.splice(0, target.length - MAX_LOG_LINES);
   const logPath = target === aiLogs ? commandLogPath : target === pluginLogs ? serverLogPath : null;
   if (logPath) appendFileSync(logPath, `${at} [${String(level).toUpperCase()}] ${text.replace(/\r?\n/g, "\\n")}\n`, "utf8");
+}
+
+async function captureDiagnosticSnapshot(reason, detail = {}) {
+  try {
+    const [processes, recentWindowsEvents] = await Promise.all([
+      queryWindowsProcesses(),
+      queryRecentWindowsEvents(15, 120).catch(() => [])
+    ]);
+    const knownPids = new Set([process.pid, runtime?.pid, windowHost?.pid, sessionMeta.launcher?.pid, sessionMeta.windowHost?.pid].filter(Number.isInteger));
+    const internalNeedle = internalRoot.replaceAll("/", "\\").toLowerCase();
+    const relevantProcesses = processes.filter((item) => knownPids.has(Number(item.processId)) || String(item.commandLine ?? "").replaceAll("/", "\\").toLowerCase().includes(internalNeedle));
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const safeReason = String(reason).replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "event";
+    const fileName = `diagnostic-${stamp}-${safeReason}.json`;
+    await writeFile(path.join(sessionDir, fileName), `${JSON.stringify({
+      capturedAt: new Date().toISOString(), reason, detail, state, sessionMeta, relevantProcesses, recentWindowsEvents
+    }, null, 2)}\n`, "utf8");
+    recordLifecycle("diagnostic.snapshot", { reason, fileName, processCount: relevantProcesses.length, windowsEventCount: recentWindowsEvents.length });
+  } catch (error) {
+    recordLifecycle("diagnostic.snapshot-error", { reason, message: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+for (const recovery of recoveredSessions) {
+  if (recovery.type === "unclean-session") {
+    const cleaned = recovery.cleaned.filter((item) => item.ok).map((item) => `${item.role}:${item.pid}`).join(", ") || "none";
+    pushLog(pluginLogs, `[Recovery] Previous session ${recovery.sessionName} ended uncleanly; verified orphan cleanup: ${cleaned}.`, "warn");
+    recordLifecycle("session.recovery", { previousSession: recovery.sessionName, cleaned: recovery.cleaned, lastHeartbeatAt: recovery.lastHeartbeatAt });
+    void captureDiagnosticSnapshot("unclean-session-recovery", { previousSession: recovery.sessionName, previousLastHeartbeatAt: recovery.lastHeartbeatAt, cleaned: recovery.cleaned });
+  } else {
+    pushLog(pluginLogs, `[Recovery] Previous-session scan failed: ${recovery.message}`, "warn");
+    recordLifecycle("session.recovery-error", { message: recovery.message });
+  }
 }
 
 async function logUpdateState() {
@@ -265,30 +338,45 @@ async function startRuntime() {
     DEVRELAY_STATE_DIR: stateDir
   } : {};
   pushLog(pluginLogs, `[GUI] Starting ${connectionLabel(setup.connection)}...`);
+  const launcherStartedAt = new Date().toISOString();
   runtime = spawn("powershell.exe", args, {
     cwd: internalRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, DEVRELAY_STATE_DIR: stateDir, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir }
+    env: {
+      ...process.env, DEVRELAY_STATE_DIR: stateDir, ...oauthEnv, DEVRELAY_AUDIT_LOG: auditPath, DEVRELAY_SESSION_DIR: sessionDir,
+      DEVRELAY_SESSION_ID: sessionId, DEVRELAY_CONTROLLER_PID: String(process.pid), DEVRELAY_CONTROLLER_STARTED_AT: controllerStartedAt
+    }
   });
+  const launcherRecord = { role: "launcher", pid: runtime.pid, startedAt: launcherStartedAt, executableName: "powershell.exe", commandIncludes: [launcherPath, "-Port", String(settings.port)] };
+  await persistSessionMeta({ launcher: launcherRecord, runtimeState: "starting" });
+  recordLifecycle("launcher.start", { pid: runtime.pid, startedAt: launcherStartedAt, port: settings.port });
 
   runtime.stdout.setEncoding("utf8");
   runtime.stderr.setEncoding("utf8");
   runtime.stdout.on("data", (chunk) => handlePluginChunk(chunk, "server"));
   runtime.stderr.on("data", (chunk) => handlePluginChunk(chunk, "server"));
   runtime.once("error", (error) => {
+    const failedPid = runtime?.pid ?? launcherRecord.pid;
     state.lastError = error.message;
     state.starting = false;
     state.running = false;
     pushLog(pluginLogs, `[GUI] ${error.message}`, "error");
+    recordLifecycle("launcher.error", { pid: failedPid, message: error.message });
+    void persistSessionMeta({ launcher: null, runtimeState: "error", lastLauncherError: { at: new Date().toISOString(), pid: failedPid, message: error.message } });
+    void captureDiagnosticSnapshot("launcher-error", { pid: failedPid, message: error.message });
     runtime = null;
   });
 
   runtime.once("exit", (code, signal) => {
+    const exitedPid = runtime?.pid ?? launcherRecord.pid;
     const expectedStop = state.stopping;
     if (expectedStop) pushLog(pluginLogs, "[GUI] Runtime stopped.");
     else pushLog(pluginLogs, `[GUI] Runtime exited  code=${code ?? "?"} signal=${signal ?? "-"}`,
       code === 0 ? "info" : "error");
+    recordLifecycle("launcher.exit", { pid: exitedPid, code, signal, expected: expectedStop });
+    void persistSessionMeta({ launcher: null, runtimeState: expectedStop ? "stopped" : "exited", lastLauncherExit: { at: new Date().toISOString(), pid: exitedPid, code, signal, expected: expectedStop } });
+    if (!expectedStop) void captureDiagnosticSnapshot("unexpected-launcher-exit", { pid: exitedPid, code, signal });
     runtime = null;
     state.running = false;
     state.starting = false;
@@ -306,13 +394,15 @@ function handlePluginChunk(chunk, level) {
     state.starting = false;
     state.running = true;
     state.startedAt ??= new Date().toISOString();
+    void persistSessionMeta({ runtimeState: "running", runtimeStartedAt: state.startedAt });
+    recordLifecycle("runtime.online", { startedAt: state.startedAt, publicUrl });
   }
   const match = text.match(/Public MCP:\s*(https:\/\/\S+)/);
   if (match) publicUrl = match[1];
 }
 function taskkill(pid) {
   return new Promise((resolve) => {
-    execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => resolve());
+    execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (error) => resolve({ ok: !error, error: error?.message ?? null }));
   });
 }
 
@@ -326,7 +416,9 @@ async function stopRuntime(reason = "user") {
   const child = runtime;
   state.stopping = true;
   pushLog(pluginLogs, `[GUI] Stopping runtime (${reason})...`);
-  await taskkill(child.pid);
+  recordLifecycle("runtime.stop-request", { reason, launcherPid: child.pid });
+  const stopResult = await taskkill(child.pid);
+  recordLifecycle("runtime.stop-result", { reason, launcherPid: child.pid, ...stopResult });
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (runtime === child) runtime = null;
   state.running = false;
@@ -335,6 +427,7 @@ async function stopRuntime(reason = "user") {
   state.startedAt = null;
   oauthControlSecret = null;
   oauthPending = [];
+  await persistSessionMeta({ launcher: null, runtimeState: "stopped", lastStop: { at: new Date().toISOString(), reason } });
 }
 
 async function pollOAuthPending() {
@@ -386,7 +479,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/app.js") return void await serveStatic(res, "app.js", "text/javascript; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/styles.css") return void await serveStatic(res, "styles.css", "text/css; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/api/state") {
-      if (req.headers["x-devrelay-gui-host"] === "wpf") lastHostHeartbeatAt = Date.now();
+      if (req.headers["x-devrelay-gui-host"] === "wpf") { lastHostHeartbeatAt = Date.now(); recordLifecycle("gui-host.heartbeat", { hostPid: windowHost?.pid ?? null }); }
       await refreshSetupFromDisk();
       return sendJson(res, 200, snapshot());
     }
@@ -401,6 +494,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/stop") {
       const body = await readJson(req);
       const reason = body.reason === "window closed" ? "window closed" : "button";
+      if (reason === "window closed") {
+        windowCloseRequestedAt = Date.now();
+        recordLifecycle("gui-host.close-request", { hostPid: windowHost?.pid ?? null });
+      }
       await stopRuntime(reason);
       return sendJson(res, 200, snapshot());
     }
@@ -469,6 +566,8 @@ const server = http.createServer(async (req, res) => {
       windowReady = true;
       lastHostHeartbeatAt = Date.now();
       lastHostHeartbeatStatus = "healthy";
+      recordLifecycle("gui-host.window-ready", { hostPid: windowHost?.pid ?? null });
+      void persistSessionMeta({ windowReadyAt: new Date().toISOString() });
       if (autoStartPending) {
         autoStartPending = false;
         void startRuntime();
@@ -497,6 +596,7 @@ async function launchWindow() {
   const profile = path.join(stateDir, "webview2-profile");
   const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
+  windowCloseRequestedAt = 0;
   lastHostHeartbeatAt = 0;
   lastHostHeartbeatStatus = "healthy";
   windowReady = false;
@@ -505,18 +605,30 @@ async function launchWindow() {
     "-File", hostScriptPath, "-Url", url, "-SdkRoot", webView2Root, "-ProfileDir", profile, "-WindowStatePath", windowStatePath
   ];
   if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("-CascadeFromStatePath", setupWindowStatePath);
+  const hostStartedAt = new Date().toISOString();
   windowHost = spawn("powershell.exe", hostArgs, { cwd: internalRoot, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const hostRecord = { role: "window-host", pid: windowHost.pid, startedAt: hostStartedAt, executableName: "powershell.exe", commandIncludes: [hostScriptPath, url] };
+  await persistSessionMeta({ windowHost: hostRecord });
+  recordLifecycle("gui-host.start", { pid: windowHost.pid, startedAt: hostStartedAt });
   windowHost.stdout.setEncoding("utf8");
   windowHost.stderr.setEncoding("utf8");
   windowHost.stdout.on("data", (chunk) => appendProcessOutput(pluginLogs, chunk, "server"));
   windowHost.stderr.on("data", (chunk) => appendProcessOutput(pluginLogs, chunk, "server"));
-  windowHost.once("exit", () => {
+  windowHost.once("exit", (code, signal) => {
+    const exitedPid = windowHost?.pid ?? hostRecord.pid;
+    const closeRequested = windowCloseRequestedAt > 0 && Date.now() - windowCloseRequestedAt <= 15_000;
+    const expectedHostExit = shuttingDown || closeRequested;
+    recordLifecycle("gui-host.exit", { pid: exitedPid, code, signal, shuttingDown, closeRequested, expected: expectedHostExit });
+    void persistSessionMeta({ windowHost: null, lastWindowHostExit: { at: new Date().toISOString(), pid: exitedPid, code, signal, expected: expectedHostExit } });
+    if (!expectedHostExit) void captureDiagnosticSnapshot("unexpected-gui-host-exit", { pid: exitedPid, code, signal });
     windowHost = null;
     windowReady = false;
     if (!shuttingDown) void shutdown("GUI window closed");
   });
   windowHost.once("error", (error) => {
     pushLog(pluginLogs, `[GUI] Window launch failed: ${error.message}`, "error");
+    recordLifecycle("gui-host.error", { pid: hostRecord.pid, message: error.message });
+    void captureDiagnosticSnapshot("gui-host-error", { pid: hostRecord.pid, message: error.message });
     void shutdown("GUI launch failed");
   });
 }
@@ -524,46 +636,70 @@ async function launchWindow() {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
+  recordLifecycle("controller.shutdown-begin", { reason, windowHostPid: windowHost?.pid ?? null, launcherPid: runtime?.pid ?? null });
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
   await stopRuntime(reason);
-  await persistSessionMeta({ endedAt: new Date().toISOString(), status: "closed", exitReason: reason });
+  const endedAt = new Date().toISOString();
+  await persistSessionMeta({ endedAt, status: "closed", exitReason: reason, launcher: null });
+  recordLifecycle("controller.shutdown-complete", { reason, endedAt });
   if (setupProcess?.pid) await taskkill(setupProcess.pid);
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);
 }
 
-process.on("SIGINT", () => { void shutdown("SIGINT"); });
-process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.on("SIGINT", () => { recordLifecycle("controller.signal", { signal: "SIGINT" }); void shutdown("SIGINT"); });
+process.on("SIGTERM", () => { recordLifecycle("controller.signal", { signal: "SIGTERM" }); void shutdown("SIGTERM"); });
 process.on("uncaughtException", (error) => {
   pushLog(pluginLogs, `[GUI] Fatal: ${error.stack ?? error.message}`, "error");
+  recordLifecycle("controller.uncaught-exception", { message: error.message, stack: error.stack ?? null });
+  void captureDiagnosticSnapshot("uncaught-exception", { message: error.message });
   void shutdown("uncaught exception");
 });
 process.on("unhandledRejection", (error) => {
   pushLog(pluginLogs, `[GUI] Rejection: ${String(error)}`, "error");
+  recordLifecycle("controller.unhandled-rejection", { message: String(error) });
+  void captureDiagnosticSnapshot("unhandled-rejection", { message: String(error) });
 });
+process.on("exit", (code) => { recordLifecycle("controller.exit", { code, shuttingDown }); });
 setInterval(() => {
   if (shuttingDown || !windowLaunchedAt || !windowReady) return;
   const heartbeat = classifyGuiHostHeartbeat({ now: Date.now(), windowLaunchedAt, lastHeartbeatAt: lastHostHeartbeatAt });
   if (heartbeat.status === "stale" && lastHostHeartbeatStatus === "healthy") {
     pushLog(pluginLogs, `[GUI] Host heartbeat stale: no native GUI signal for ${heartbeat.ageMs}ms.`, "warn");
+    recordLifecycle("gui-host.heartbeat-stale", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
   } else if (heartbeat.status === "healthy" && lastHostHeartbeatStatus !== "healthy") {
     pushLog(pluginLogs, "[GUI] Host heartbeat recovered. Runtime remains stopped until explicitly started.");
+    recordLifecycle("gui-host.heartbeat-recovered", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
   } else if (heartbeat.status === "lost" && lastHostHeartbeatStatus !== "lost") {
     pushLog(pluginLogs, `[GUI] Host heartbeat lost after ${heartbeat.ageMs}ms; stopping runtime without closing the controller.`, "warn");
+    recordLifecycle("gui-host.heartbeat-lost", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
+    void captureDiagnosticSnapshot("gui-host-heartbeat-lost", { ageMs: heartbeat.ageMs });
     void stopRuntime("GUI host heartbeat lost").catch((error) => {
       pushLog(pluginLogs, `[GUI] Failed to stop runtime after GUI host heartbeat loss: ${error.message}`, "error");
     });
   }
   lastHostHeartbeatStatus = heartbeat.status;
-}, 1000).unref();
+}, 10_000).unref();
+
+setInterval(() => {
+  const at = new Date().toISOString();
+  const summary = {
+    windowReady, hostHeartbeatStatus: lastHostHeartbeatStatus, hostHeartbeatAgeMs: lastHostHeartbeatAt ? Date.now() - lastHostHeartbeatAt : null,
+    windowHostPid: windowHost?.pid ?? null, launcherPid: runtime?.pid ?? null, running: state.running, starting: state.starting, stopping: state.stopping
+  };
+  recordLifecycle("controller.heartbeat", summary);
+  void persistSessionMeta({ lastHeartbeatAt: at, lastKnownState: summary }).catch((error) => recordLifecycle("session.persist-error", { message: error.message }));
+}, CONTROLLER_HEARTBEAT_INTERVAL_MS).unref();
 
 server.on("error", (error) => {
+  recordLifecycle("controller.server-error", { code: error.code ?? null, message: error.message });
   if (error.code === "EADDRINUSE") process.exit(0);
   throw error;
 });
 
 server.listen(guiPort, "127.0.0.1", () => {
+  recordLifecycle("controller.listen", { host: "127.0.0.1", port: guiPort });
   pushLog(pluginLogs, `[GUI] DevRelay control window ready on 127.0.0.1:${guiPort}`);
   void launchWindow().catch((error) => {
     pushLog(pluginLogs, `[GUI] Window launch failed: ${error.message}`, "error");

@@ -23,6 +23,13 @@ $CloudflareNamedPath = Join-Path $StateDir "cloudflare-named.json"
 $LegacyNamedPath = Join-Path $StateDir "https-named.json"
 $HostAddress = "127.0.0.1"
 $McpUrl = "http://${HostAddress}:$Port/mcp"
+$SessionDir = [string]$env:DEVRELAY_SESSION_DIR
+$SessionId = [string]$env:DEVRELAY_SESSION_ID
+$ProcessStatePath = if ($SessionDir) { Join-Path $SessionDir "processes.json" } else { $null }
+$LauncherLifecyclePath = if ($SessionDir) { Join-Path $SessionDir "launcher-lifecycle.ndjson" } else { $null }
+$script:TrackedRuntime = $null
+$script:TrackedTunnel = $null
+$script:LauncherRecord = $null
 
 . (Join-Path $PSScriptRoot "DevRelay-ProviderTools.ps1")
 
@@ -48,6 +55,84 @@ function Get-ObjectValue($Object, [string]$Name, $Default = $null) {
   $property = $Object.PSObject.Properties[$Name]
   if ($null -eq $property) { return $Default }
   return $property.Value
+}
+
+function Get-ProcessStartedAt($Process) {
+  try { return $Process.StartTime.ToUniversalTime().ToString("o") }
+  catch { return (Get-Date).ToUniversalTime().ToString("o") }
+}
+function Get-ParentProcessId([int]$ProcessId) {
+  try { return [int](Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId").ParentProcessId }
+  catch { return $null }
+}
+function New-TrackedProcessRecord([string]$Role, $Process, [string]$ExecutablePath, [string[]]$CommandIncludes) {
+  if ($null -eq $Process) { return $null }
+  return [ordered]@{
+    role = $Role
+    pid = [int]$Process.Id
+    parentPid = Get-ParentProcessId ([int]$Process.Id)
+    startedAt = Get-ProcessStartedAt $Process
+    executableName = [IO.Path]::GetFileName($ExecutablePath)
+    executablePath = $ExecutablePath
+    commandIncludes = @($CommandIncludes)
+  }
+}
+function Write-LauncherLifecycle([string]$Event, [hashtable]$Data = @{}) {
+  if (-not $LauncherLifecyclePath) { return }
+  try {
+    $entry = [ordered]@{ at = (Get-Date).ToUniversalTime().ToString("o"); event = $Event; launcherPid = $PID; sessionId = $SessionId }
+    foreach ($item in $Data.GetEnumerator()) { $entry[$item.Key] = $item.Value }
+    $line = ($entry | ConvertTo-Json -Compress -Depth 8) + [Environment]::NewLine
+    [IO.File]::AppendAllText($LauncherLifecyclePath, $line, (New-Object Text.UTF8Encoding($false)))
+  } catch {}
+}
+function Write-SessionProcessState([string]$Status) {
+  if (-not $ProcessStatePath) { return }
+  try {
+    Write-JsonFile $ProcessStatePath ([ordered]@{
+      sessionId = $SessionId
+      updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+      status = $Status
+      controllerPid = if ($env:DEVRELAY_CONTROLLER_PID) { [int]$env:DEVRELAY_CONTROLLER_PID } else { $null }
+      launcher = $script:LauncherRecord
+      runtime = $script:TrackedRuntime
+      tunnel = $script:TrackedTunnel
+    })
+  } catch {}
+}
+function Set-TrackedProcess([string]$Role, $Process, [string]$ExecutablePath, [string[]]$CommandIncludes) {
+  $record = New-TrackedProcessRecord $Role $Process $ExecutablePath $CommandIncludes
+  if ($Role -eq "runtime") { $script:TrackedRuntime = $record }
+  elseif ($Role -eq "tunnel") { $script:TrackedTunnel = $record }
+  Write-LauncherLifecycle "$Role.start" @{ pid = $record.pid; parentPid = $record.parentPid; startedAt = $record.startedAt; executableName = $record.executableName }
+  Write-SessionProcessState "running"
+  return $Process
+}
+function Clear-TrackedProcess([int]$ProcessId, [string]$Reason) {
+  if ($script:TrackedRuntime -and [int]$script:TrackedRuntime.pid -eq $ProcessId) {
+    Write-LauncherLifecycle "runtime.clear" @{ pid = $ProcessId; reason = $Reason }
+    $script:TrackedRuntime = $null
+  }
+  if ($script:TrackedTunnel -and [int]$script:TrackedTunnel.pid -eq $ProcessId) {
+    Write-LauncherLifecycle "tunnel.clear" @{ pid = $ProcessId; reason = $Reason }
+    $script:TrackedTunnel = $null
+  }
+  Write-SessionProcessState "running"
+}
+
+if ($SessionDir) {
+  $current = Get-Process -Id $PID
+  $script:LauncherRecord = [ordered]@{
+    role = "launcher"
+    pid = [int]$PID
+    parentPid = Get-ParentProcessId $PID
+    startedAt = Get-ProcessStartedAt $current
+    executableName = "powershell.exe"
+    executablePath = $current.Path
+    commandIncludes = @($PSCommandPath, "-Port", [string]$Port)
+  }
+  Write-SessionProcessState "launcher-started"
+  Write-LauncherLifecycle "launcher.start" @{ parentPid = $script:LauncherRecord.parentPid; startedAt = $script:LauncherRecord.startedAt; port = $Port }
 }
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory = $Root) {
   Push-Location $WorkingDirectory
@@ -104,18 +189,22 @@ function Test-LocalPort([int]$TestPort, [int]$TimeoutMs = 500) {
 }
 function Stop-ProcessTree($Process) {
   if ($null -eq $Process) { return }
+  $processId = [int]$Process.Id
+  Write-LauncherLifecycle "process.stop-request" @{ pid = $processId }
   try {
-    if (-not $Process.HasExited) { & taskkill.exe /PID $Process.Id /T /F 2>$null | Out-Null }
-  } catch { try { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue } catch {} }
+    if (-not $Process.HasExited) { & taskkill.exe /PID $processId /T /F 2>$null | Out-Null }
+  } catch { try { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue } catch {} }
+  finally { Clear-TrackedProcess $processId "stop-tree" }
 }
 function Start-DevRelay([string]$NodeExe) {
   if (Test-LocalPort $Port) { throw "TCP port $Port is already in use. Stop the existing listener or change the Port setting." }
   $entry = Join-Path $Root "dist\src\main.js"
   Write-Step "Starting DevRelay HTTP MCP at $McpUrl..."
   $process = Start-Process -FilePath $NodeExe -ArgumentList @($entry, "--http", "--host", $HostAddress, "--port", [string]$Port) -WorkingDirectory $Root -NoNewWindow -PassThru
+  Set-TrackedProcess "runtime" $process $NodeExe @($entry, "--http", "--host", $HostAddress, "--port", [string]$Port) | Out-Null
   for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 250
-    if ($process.HasExited) { throw "DevRelay exited during startup with code $($process.ExitCode)." }
+    if ($process.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $process.Id; exitCode = $process.ExitCode; phase = "startup" }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited during startup with code $($process.ExitCode)." }
     if (Test-LocalPort $Port) { Write-Step "DevRelay is ready."; return $process }
   }
   Stop-ProcessTree $process
@@ -156,7 +245,9 @@ function Get-TailscalePublicUrl([string]$Exe) {
 }
 function Start-TailscaleFunnel([string]$Exe) {
   Write-Step "Starting Tailscale Funnel..."
-  return Start-Process -FilePath $Exe -ArgumentList @("funnel", "--yes", "--https=443", "127.0.0.1:$Port") -WorkingDirectory $Root -NoNewWindow -PassThru
+  $process = Start-Process -FilePath $Exe -ArgumentList @("funnel", "--yes", "--https=443", "127.0.0.1:$Port") -WorkingDirectory $Root -NoNewWindow -PassThru
+  Set-TrackedProcess "tunnel" $process $Exe @("funnel", "--https=443", "127.0.0.1:$Port") | Out-Null
+  return $process
 }
 function Get-CloudflareNamedSettings {
   $settings = Read-JsonFile $CloudflareNamedPath
@@ -209,10 +300,13 @@ function Start-CloudflareNamed([string]$Exe, $Settings) {
   Remove-Item $logPath -Force -ErrorAction SilentlyContinue
   $arguments = @("tunnel", "--config", [string]$Settings.configPath, "--loglevel", "info", "--logfile", $logPath, "run", [string]$Settings.tunnelName)
   $process = Start-Process -FilePath $Exe -ArgumentList $arguments -WorkingDirectory $Root -NoNewWindow -PassThru
+  Set-TrackedProcess "tunnel" $process $Exe @("tunnel", $logPath, [string]$Settings.tunnelName) | Out-Null
   for ($i = 0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 250
     if ($process.HasExited) {
       $details = if (Test-Path $logPath) { Get-Content -Raw $logPath } else { "" }
+      Write-LauncherLifecycle "tunnel.exit" @{ pid = $process.Id; exitCode = $process.ExitCode; provider = "cloudflare"; phase = "startup" }
+      Write-SessionProcessState "tunnel-exited"
       throw "cloudflared exited during startup with code $($process.ExitCode). $details"
     }
     if ((Test-Path $logPath) -and ((Get-Content -Raw $logPath) -match 'Registered tunnel connection')) { return $process }
@@ -229,9 +323,10 @@ function Start-CloudflareQuick([string]$Exe) {
   Remove-Item $logPath,$stdoutPath,$stderrPath -Force -ErrorAction SilentlyContinue
   Write-Step "Creating Cloudflare temporary URL..."
   $process = Start-Process -FilePath $Exe -ArgumentList @("tunnel", "--url", "http://${HostAddress}:$Port", "--loglevel", "info", "--logfile", $logPath) -WorkingDirectory $Root -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru -WindowStyle Hidden
+  Set-TrackedProcess "tunnel" $process $Exe @("tunnel", "--url", "http://${HostAddress}:$Port", $logPath) | Out-Null
   for ($i = 0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 250
-    if ($process.HasExited) { throw "cloudflared temporary URL exited during startup with code $($process.ExitCode)." }
+    if ($process.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $process.Id; exitCode = $process.ExitCode; provider = "cloudflare-quick"; phase = "startup" }; Write-SessionProcessState "tunnel-exited"; throw "cloudflared temporary URL exited during startup with code $($process.ExitCode)." }
     $text = ""
     foreach ($path in @($logPath,$stdoutPath,$stderrPath)) { if (Test-Path $path) { $text += "`n" + (Get-Content -Raw $path) } }
     $match = [regex]::Match($text, 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
@@ -290,6 +385,8 @@ if ($NoTunnel) {
     $devRelayProcess = Start-DevRelay $nodeExe
     Write-Host "DevRelay is running locally at $McpUrl" -ForegroundColor Green
     while (-not $devRelayProcess.HasExited) { Start-Sleep -Seconds 1 }
+    Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode; provider = "local" }
+    Write-SessionProcessState "runtime-exited"
     throw "DevRelay exited with code $($devRelayProcess.ExitCode)."
   } finally { Stop-ProcessTree $devRelayProcess }
 }
@@ -316,15 +413,16 @@ if ([string]$connection.kind -eq "openai-secure-tunnel") {
     Invoke-OpenAIDoctor $tunnelExe $apiKey
     $env:CONTROL_PLANE_API_KEY = $apiKey
     $tunnelProcess = Start-Process -FilePath $tunnelExe -ArgumentList @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) -WorkingDirectory $Root -NoNewWindow -PassThru
+    Set-TrackedProcess "tunnel" $tunnelProcess $tunnelExe @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) | Out-Null
     Start-Sleep -Seconds 1
-    if ($tunnelProcess.HasExited) { throw "OpenAI tunnel-client exited during startup with code $($tunnelProcess.ExitCode)." }
+    if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "openai"; phase = "startup" }; Write-SessionProcessState "tunnel-exited"; throw "OpenAI tunnel-client exited during startup with code $($tunnelProcess.ExitCode)." }
     Write-Host "DevRelay is online for ChatGPT." -ForegroundColor Green
     Write-Host "  Local MCP: $McpUrl"
     Write-Host "  Tunnel ID: $([string]$config.tunnelId)"
     while ($true) {
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($tunnelProcess.HasExited) { throw "OpenAI tunnel-client exited with code $($tunnelProcess.ExitCode)." }
+      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
+      if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "openai" }; Write-SessionProcessState "tunnel-exited"; throw "OpenAI tunnel-client exited with code $($tunnelProcess.ExitCode)." }
     }
   } finally {
     Stop-ProcessTree $tunnelProcess
@@ -348,14 +446,14 @@ if ([string]$connection.provider -eq "tailscale") {
     $devRelayProcess = Start-DevRelay $nodeExe
     $funnelProcess = Start-TailscaleFunnel $tailscaleExe
     Start-Sleep -Seconds 1
-    if ($funnelProcess.HasExited) { throw "Tailscale Funnel exited during startup with code $($funnelProcess.ExitCode)." }
+    if ($funnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $funnelProcess.Id; exitCode = $funnelProcess.ExitCode; provider = "tailscale"; phase = "startup" }; Write-SessionProcessState "tunnel-exited"; throw "Tailscale Funnel exited during startup with code $($funnelProcess.ExitCode)." }
     Write-Host "DevRelay HTTPS is online." -ForegroundColor Green
     Write-Host "  Local MCP:  $McpUrl"
     Write-Host "  Public MCP: $publicMcpUrl"
     while ($true) {
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($funnelProcess.HasExited) { throw "Tailscale Funnel exited with code $($funnelProcess.ExitCode)." }
+      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
+      if ($funnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $funnelProcess.Id; exitCode = $funnelProcess.ExitCode; provider = "tailscale" }; Write-SessionProcessState "tunnel-exited"; throw "Tailscale Funnel exited with code $($funnelProcess.ExitCode)." }
     }
   } finally {
     Stop-ProcessTree $funnelProcess
@@ -382,8 +480,8 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
     Write-Host "  Public MCP: $publicMcpUrl"
     while ($true) {
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($tunnelProcess.HasExited) { throw "cloudflared exited with code $($tunnelProcess.ExitCode)." }
+      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
+      if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "cloudflare" }; Write-SessionProcessState "tunnel-exited"; throw "cloudflared exited with code $($tunnelProcess.ExitCode)." }
     }
   } finally {
     Stop-ProcessTree $tunnelProcess
@@ -406,8 +504,8 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
     Write-Host "  Public MCP: $($quick.PublicMcpUrl)"
     while ($true) {
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($quick.Process.HasExited) { throw "Cloudflare temporary URL exited with code $($quick.Process.ExitCode)." }
+      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
+      if ($quick.Process.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $quick.Process.Id; exitCode = $quick.Process.ExitCode; provider = "cloudflare-quick" }; Write-SessionProcessState "tunnel-exited"; throw "Cloudflare temporary URL exited with code $($quick.Process.ExitCode)." }
     }
   } finally {
     if ($quick) { Stop-ProcessTree $quick.Process }

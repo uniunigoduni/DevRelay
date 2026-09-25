@@ -2,6 +2,23 @@
 
 All notable changes to DevRelay are documented here.
 
+## 0.4.1 - 2026-09-25
+
+### Added
+
+- Added append-only controller/launcher lifecycle journals, persisted controller/GUI/launcher/runtime/tunnel process identities, two-minute controller health snapshots, and anomaly snapshots with related processes plus recent Windows Application/System/PowerShell events for postmortem diagnosis.
+- Diagnostic retention now keeps the latest three normal GUI sessions plus up to five recent unclean/diagnostic sessions, preventing useful crash evidence from disappearing after a few restarts.
+- Added startup recovery for unclean GUI sessions. Recorded child processes are verified by PID, creation time, executable, and command-line identity before cleanup; legacy cloudflared orphans are recoverable by their session-specific logfile path.
+
+### Changed
+
+- Native WPF host heartbeat signals are now sent every two minutes instead of on every state refresh. Host-process exit remains authoritative; the supplemental watchdog warns after 2.5 minutes without a signal and stops the runtime after five minutes.
+
+### Fixed
+
+- Self-restart now closes the native WPF window through its normal Stop/shutdown path before falling back to force termination, so maintenance restarts are recorded as clean exits instead of false crashes.
+- Fixed a PowerShell restart-helper variable collision with the built-in `$Host variable that could skip the intended GUI-close loop and force-kill the controller after its timeout.
+
 ## 0.4.0 - 2026-09-25
 
 ### Added

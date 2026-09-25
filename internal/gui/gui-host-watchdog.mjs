@@ -1,6 +1,7 @@
-export const GUI_HOST_HEARTBEAT_STARTUP_GRACE_MS = 8_000;
-export const GUI_HOST_HEARTBEAT_WARN_AFTER_MS = 5_000;
-export const GUI_HOST_HEARTBEAT_STOP_AFTER_MS = 20_000;
+export const GUI_HOST_HEARTBEAT_INTERVAL_MS = 120_000;
+export const GUI_HOST_HEARTBEAT_STARTUP_GRACE_MS = 150_000;
+export const GUI_HOST_HEARTBEAT_WARN_AFTER_MS = 150_000;
+export const GUI_HOST_HEARTBEAT_STOP_AFTER_MS = 300_000;
 
 export function classifyGuiHostHeartbeat({
   now = Date.now(),

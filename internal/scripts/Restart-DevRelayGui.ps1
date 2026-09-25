@@ -44,10 +44,34 @@ $internal = Join-Path $ProjectRoot "internal"
 $hostScript = Join-Path $internal "gui\host\DevRelay-GuiHost.ps1"
 $launchVbs = Join-Path $internal "gui\launch.vbs"
 
-Get-CimInstance Win32_Process | Where-Object {
+$hosts = @(Get-CimInstance Win32_Process | Where-Object {
   $_.Name -ieq "powershell.exe" -and $_.CommandLine -and
   $_.CommandLine.IndexOf($hostScript, [StringComparison]::OrdinalIgnoreCase) -ge 0
-} | ForEach-Object { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue }
+})
+foreach ($hostInfo in $hosts) {
+  $hostPid = [int]$hostInfo.ProcessId
+  $process = Get-Process -Id $hostPid -ErrorAction SilentlyContinue
+  $closeRequested = $false
+  if ($process) {
+    try { $closeRequested = [bool]$process.CloseMainWindow() } catch {}
+  }
+  if ($closeRequested) {
+    $hostDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ([DateTime]::UtcNow -lt $hostDeadline -and (Get-Process -Id $hostPid -ErrorAction SilentlyContinue)) {
+      Start-Sleep -Milliseconds 100
+    }
+  }
+  if (Get-Process -Id $hostPid -ErrorAction SilentlyContinue) {
+    # Tell the controller this is an intentional GUI close before using the
+    # last-resort force termination path.
+    try {
+      Invoke-RestMethod -Uri "http://127.0.0.1:7318/api/stop" -Method Post `
+        -Headers @{ Origin = "http://127.0.0.1:7318" } -ContentType "application/json" `
+        -Body '{"reason":"window closed"}' -TimeoutSec 4 | Out-Null
+    } catch {}
+    Stop-Process -Id $hostPid -Force -ErrorAction SilentlyContinue
+  }
+}
 
 if ($ControllerPid -gt 0) {
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)

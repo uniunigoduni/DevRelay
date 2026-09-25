@@ -1,4 +1,4 @@
-﻿# DevRelay
+# DevRelay
 
 DevRelay is a deliberately small MCP server that gives an MCP client access to the command line of a development machine.
 
@@ -175,6 +175,6 @@ After setup, the main GUI shows the current Connection and endpoint. `Connection
 
 The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings live in the custom title bar. The window remembers its last normal size, supports a 480x480 minimum, and uses Noto Sans Mono with the `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped; an incoming HTTPS OAuth authorization request brings the main window forward and shows a blocking approval dialog over the app. Closing the GUI stops DevRelay and its active connection process.
 
-Each visible window launch writes a session under `internal/.devrelay/logs/`; only the latest three sessions are retained. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
+Each visible window launch writes a session under `internal/.devrelay/logs/`; session diagnostics include server/command logs plus controller/launcher lifecycle and process-identity records used to diagnose and safely recover unclean exits. The latest three sessions are retained, plus up to five recent unclean/diagnostic sessions for postmortem analysis. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 
 See [docs/launcher.md](internal/docs/launcher.md) for details.

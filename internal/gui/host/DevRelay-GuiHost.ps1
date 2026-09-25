@@ -452,10 +452,15 @@ $window.Add_Loaded({
   catch { Write-Host "[GuiHost] EnsureCoreWebView2Async failed: $($_.Exception.Message)" }
 })
 
+$script:lastHostHeartbeatSentAt = [DateTime]::MinValue
+$script:hostHeartbeatInterval = [TimeSpan]::FromMinutes(2)
+
 function Refresh-State {
   try {
-    $headers = if ($SetupMode) { @{} } else { @{ "X-DevRelay-Gui-Host" = "wpf" } }
+    $sendHeartbeat = (-not $SetupMode) -and (((Get-Date) - $script:lastHostHeartbeatSentAt) -ge $script:hostHeartbeatInterval)
+    $headers = if ($sendHeartbeat) { @{ "X-DevRelay-Gui-Host" = "wpf" } } else { @{} }
     $state = Invoke-RestMethod -Uri "$origin/api/state" -Method Get -Headers $headers -TimeoutSec 1
+    if ($sendHeartbeat) { $script:lastHostHeartbeatSentAt = Get-Date }
     $script:lastState = $state
     Apply-Theme ([string]$state.theme)
     if ($SetupMode) {
