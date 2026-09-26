@@ -1,6 +1,6 @@
 {
   "name": "devrelay",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "A minimal MCP bridge for arbitrary command-line execution on a development machine.",
   "type": "module",

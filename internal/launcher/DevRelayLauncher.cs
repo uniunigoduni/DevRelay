@@ -10,8 +10,8 @@ using System.Text;
 [assembly: AssemblyProduct("DevRelay")]
 [assembly: AssemblyDescription("DevRelay Windows launcher")]
 [assembly: AssemblyCompany("DevRelay")]
-[assembly: AssemblyVersion("0.4.1.0")]
-[assembly: AssemblyFileVersion("0.4.1.0")]
+[assembly: AssemblyVersion("0.4.2.0")]
+[assembly: AssemblyFileVersion("0.4.2.0")]
 
 internal static class Program
 {

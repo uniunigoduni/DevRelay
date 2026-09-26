@@ -2,6 +2,13 @@
 
 All notable changes to DevRelay are documented here.
 
+## 0.4.2 - 2026-09-26
+
+### Changed
+
+- Native GUI-host heartbeat age is now diagnostic only. A stale/lost heartbeat no longer stops the runtime, avoiding false shutdowns across Windows sleep/resume while the WPF host process remains alive.
+- The GUI controller now preserves the user's desired runtime state: Start requests `desiredRunning=true`, explicit Stop requests clear it, and a recovered native GUI heartbeat restores the runtime only when the user still wants it running and it is currently stopped.
+
 ## 0.4.1 - 2026-09-25
 
 ### Added

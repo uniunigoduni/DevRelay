@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
-import { classifyGuiHostHeartbeat } from "./gui-host-watchdog.mjs";
+import { classifyGuiHostHeartbeat, isGuiHostRecoverySignal, shouldResumeRuntimeAfterGuiRecovery } from "./gui-host-watchdog.mjs";
 import { queryRecentWindowsEvents, queryWindowsProcesses, recoverUncleanSessions } from "./session-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
@@ -103,6 +103,7 @@ async function pruneLogSessions() {
 await pruneLogSessions();
 
 let settings = await loadSettings();
+let runtimeDesiredRunning = settings.autoStart === true;
 let sessionMeta = {
   sessionId,
   startedAt: controllerStartedAt,
@@ -114,7 +115,8 @@ let sessionMeta = {
   controller: { role: "controller", pid: process.pid, parentPid: process.ppid, startedAt: controllerStartedAt, executableName: path.basename(process.execPath), commandIncludes: ["devrelay-gui.mjs"] },
   windowHost: null,
   launcher: null,
-  lastHeartbeatAt: controllerStartedAt
+  lastHeartbeatAt: controllerStartedAt,
+  runtimeDesiredRunning
 };
 async function persistSessionMeta(values = {}) {
   sessionMeta = { ...sessionMeta, ...values };
@@ -124,6 +126,53 @@ function recordLifecycle(event, detail = {}) {
   try {
     appendFileSync(lifecyclePath, `${JSON.stringify({ at: new Date().toISOString(), event, controllerPid: process.pid, parentPid: process.ppid, ...detail })}\n`, "utf8");
   } catch { /* lifecycle logging must never take the controller down */ }
+}
+function setRuntimeDesiredRunning(value, source) {
+  const next = value === true;
+  if (runtimeDesiredRunning === next) return;
+  runtimeDesiredRunning = next;
+  const changedAt = new Date().toISOString();
+  recordLifecycle("runtime.intent", { desiredRunning: next, source });
+  void persistSessionMeta({ runtimeDesiredRunning: next, runtimeIntentChangedAt: changedAt, runtimeIntentSource: source })
+    .catch((error) => recordLifecycle("session.persist-error", { message: error.message }));
+}
+
+function handleGuiHostSignal() {
+  const now = Date.now();
+  const previousAt = lastHostHeartbeatAt;
+  const previousStatus = lastHostHeartbeatStatus;
+  const gapMs = previousAt > 0 ? Math.max(0, now - previousAt) : 0;
+  const recovered = previousAt > 0 && isGuiHostRecoverySignal({ previousStatus, gapMs });
+  lastHostHeartbeatAt = now;
+  lastHostHeartbeatStatus = "healthy";
+  recordLifecycle("gui-host.heartbeat", { hostPid: windowHost?.pid ?? null, gapMs });
+  if (!recovered) return;
+
+  recordLifecycle("gui-host.heartbeat-recovered", {
+    gapMs, hostPid: windowHost?.pid ?? null, desiredRunning: runtimeDesiredRunning
+  });
+  setTimeout(() => {
+    const resumeRuntime = shouldResumeRuntimeAfterGuiRecovery({
+      desiredRunning: runtimeDesiredRunning,
+      running: state.running,
+      starting: state.starting,
+      stopping: state.stopping,
+      shuttingDown,
+      windowReady,
+      windowHostPresent: Boolean(windowHost?.pid)
+    });
+    if (!resumeRuntime) {
+      pushLog(pluginLogs, `[GUI] Host heartbeat recovered after ${gapMs}ms; runtime state unchanged.`);
+      recordLifecycle("runtime.resume-skipped", { source: "GUI host recovered", desiredRunning: runtimeDesiredRunning });
+      return;
+    }
+    pushLog(pluginLogs, `[GUI] Host heartbeat recovered after ${gapMs}ms; restoring requested Start state.`);
+    recordLifecycle("runtime.resume-request", { source: "GUI host recovered" });
+    void startRuntime("GUI host recovered").catch((error) => {
+      pushLog(pluginLogs, `[GUI] Failed to restore runtime after GUI host recovery: ${error.message}`, "error");
+      recordLifecycle("runtime.resume-error", { source: "GUI host recovered", message: error.message });
+    });
+  }, 750).unref();
 }
 await persistSessionMeta();
 recordLifecycle("controller.start", { sessionId, recoveredSessionCount: recoveredSessions.length });
@@ -257,6 +306,7 @@ function snapshot() {
     setupComplete: setup.completed,
     setupOpen: setupProcess !== null,
     windowReady,
+    desiredRunning: runtimeDesiredRunning,
     sessionDir,
     localUrl: `http://127.0.0.1:${settings.port}/mcp`,
     publicUrl,
@@ -311,7 +361,8 @@ function formatAudit(event) {
 }
 
 setInterval(() => { void pollAudit(); }, 350).unref();
-async function startRuntime() {
+async function startRuntime(reason = "user") {
+  setRuntimeDesiredRunning(true, reason);
   if (runtime || state.starting || state.running) return;
   state.starting = true;
   state.stopping = false;
@@ -479,16 +530,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/app.js") return void await serveStatic(res, "app.js", "text/javascript; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/styles.css") return void await serveStatic(res, "styles.css", "text/css; charset=utf-8");
     if (req.method === "GET" && url.pathname === "/api/state") {
-      if (req.headers["x-devrelay-gui-host"] === "wpf") { lastHostHeartbeatAt = Date.now(); recordLifecycle("gui-host.heartbeat", { hostPid: windowHost?.pid ?? null }); }
+      if (req.headers["x-devrelay-gui-host"] === "wpf") handleGuiHostSignal();
       await refreshSetupFromDisk();
       return sendJson(res, 200, snapshot());
     }
 
     if (req.method === "POST" && url.pathname === "/api/start") {
-      if (!windowReady || lastHostHeartbeatStatus === "lost") {
+      if (!windowReady || !windowHost?.pid) {
         return sendJson(res, 409, { error: "The visible GUI host is not ready." });
       }
-      await startRuntime();
+      await startRuntime("button");
       return sendJson(res, 202, snapshot());
     }
     if (req.method === "POST" && url.pathname === "/api/stop") {
@@ -498,6 +549,7 @@ const server = http.createServer(async (req, res) => {
         windowCloseRequestedAt = Date.now();
         recordLifecycle("gui-host.close-request", { hostPid: windowHost?.pid ?? null });
       }
+      setRuntimeDesiredRunning(false, reason);
       await stopRuntime(reason);
       return sendJson(res, 200, snapshot());
     }
@@ -570,7 +622,7 @@ const server = http.createServer(async (req, res) => {
       void persistSessionMeta({ windowReadyAt: new Date().toISOString() });
       if (autoStartPending) {
         autoStartPending = false;
-        void startRuntime();
+        void startRuntime("auto-start");
       }
       return sendJson(res, 200, { ok: true });
     }
@@ -638,6 +690,7 @@ async function shutdown(reason) {
   shuttingDown = true;
   recordLifecycle("controller.shutdown-begin", { reason, windowHostPid: windowHost?.pid ?? null, launcherPid: runtime?.pid ?? null });
   pushLog(pluginLogs, `[GUI] Closing: ${reason}`);
+  setRuntimeDesiredRunning(false, reason);
   await stopRuntime(reason);
   const endedAt = new Date().toISOString();
   await persistSessionMeta({ endedAt, status: "closed", exitReason: reason, launcher: null });
@@ -666,18 +719,12 @@ setInterval(() => {
   if (shuttingDown || !windowLaunchedAt || !windowReady) return;
   const heartbeat = classifyGuiHostHeartbeat({ now: Date.now(), windowLaunchedAt, lastHeartbeatAt: lastHostHeartbeatAt });
   if (heartbeat.status === "stale" && lastHostHeartbeatStatus === "healthy") {
-    pushLog(pluginLogs, `[GUI] Host heartbeat stale: no native GUI signal for ${heartbeat.ageMs}ms.`, "warn");
-    recordLifecycle("gui-host.heartbeat-stale", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
-  } else if (heartbeat.status === "healthy" && lastHostHeartbeatStatus !== "healthy") {
-    pushLog(pluginLogs, "[GUI] Host heartbeat recovered. Runtime remains stopped until explicitly started.");
-    recordLifecycle("gui-host.heartbeat-recovered", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
+    pushLog(pluginLogs, `[GUI] Host heartbeat stale: no native GUI signal for ${heartbeat.ageMs}ms; diagnostic only, runtime unchanged.`, "warn");
+    recordLifecycle("gui-host.heartbeat-stale", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null, diagnosticOnly: true });
   } else if (heartbeat.status === "lost" && lastHostHeartbeatStatus !== "lost") {
-    pushLog(pluginLogs, `[GUI] Host heartbeat lost after ${heartbeat.ageMs}ms; stopping runtime without closing the controller.`, "warn");
-    recordLifecycle("gui-host.heartbeat-lost", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null });
-    void captureDiagnosticSnapshot("gui-host-heartbeat-lost", { ageMs: heartbeat.ageMs });
-    void stopRuntime("GUI host heartbeat lost").catch((error) => {
-      pushLog(pluginLogs, `[GUI] Failed to stop runtime after GUI host heartbeat loss: ${error.message}`, "error");
-    });
+    pushLog(pluginLogs, `[GUI] Host heartbeat lost after ${heartbeat.ageMs}ms; diagnostic only, runtime unchanged.`, "warn");
+    recordLifecycle("gui-host.heartbeat-lost", { ageMs: heartbeat.ageMs, hostPid: windowHost?.pid ?? null, diagnosticOnly: true });
+    void captureDiagnosticSnapshot("gui-host-heartbeat-lost", { ageMs: heartbeat.ageMs, diagnosticOnly: true });
   }
   lastHostHeartbeatStatus = heartbeat.status;
 }, 10_000).unref();
@@ -686,7 +733,7 @@ setInterval(() => {
   const at = new Date().toISOString();
   const summary = {
     windowReady, hostHeartbeatStatus: lastHostHeartbeatStatus, hostHeartbeatAgeMs: lastHostHeartbeatAt ? Date.now() - lastHostHeartbeatAt : null,
-    windowHostPid: windowHost?.pid ?? null, launcherPid: runtime?.pid ?? null, running: state.running, starting: state.starting, stopping: state.stopping
+    windowHostPid: windowHost?.pid ?? null, launcherPid: runtime?.pid ?? null, desiredRunning: runtimeDesiredRunning, running: state.running, starting: state.starting, stopping: state.stopping
   };
   recordLifecycle("controller.heartbeat", summary);
   void persistSessionMeta({ lastHeartbeatAt: at, lastKnownState: summary }).catch((error) => recordLifecycle("session.persist-error", { message: error.message }));
