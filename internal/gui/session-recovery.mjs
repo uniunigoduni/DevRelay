@@ -97,8 +97,9 @@ export function selectSessionOwnedProcesses({ sessionDir, internalRoot, sessionM
   return [...selected.values()].sort((a, b) => (priority.get(a.role) ?? 10) - (priority.get(b.role) ?? 10));
 }
 
-export async function queryWindowsProcesses() {
+export async function queryProcesses() {
   if (process.platform === "linux") return await queryLinuxProcesses();
+  if (process.platform === "darwin") return await queryMacProcesses();
   if (process.platform !== "win32") return [];
   const script = [
     "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
@@ -163,6 +164,46 @@ export async function queryLinuxProcesses({ procRoot = "/proc" } = {}) {
   return processes.filter(Boolean);
 }
 
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+function runPs(args) {
+  return new Promise((resolve, reject) => {
+    execFile("ps", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: "C" } },
+      (error, stdout) => error ? reject(error) : resolve(String(stdout)));
+  });
+}
+
+// BSD ps truncates comm unless it is the last column, so the executable path
+// comes from a second listing joined by PID.
+export async function queryMacProcesses({ ps = runPs } = {}) {
+  const [details, executables] = await Promise.all([
+    ps(["-axww", "-o", "pid=", "-o", "ppid=", "-o", "lstart=", "-o", "args="]),
+    ps(["-axww", "-o", "pid=", "-o", "comm="])
+  ]);
+  const executablePaths = new Map();
+  for (const line of executables.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (match) executablePaths.set(Number(match[1]), match[2].trim());
+  }
+  const processes = [];
+  for (const line of details.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})\s+(.*)$/);
+    if (!match) continue;
+    const [, pid, parentPid, month, day, hour, minute, second, year, commandLine] = match;
+    const executablePath = executablePaths.get(Number(pid)) ?? "";
+    const started = new Date(Number(year), MONTHS[month] ?? NaN, Number(day), Number(hour), Number(minute), Number(second));
+    processes.push({
+      processId: Number(pid),
+      parentProcessId: Number(parentPid),
+      name: path.basename(executablePath || commandLine.trim().split(/\s+/)[0] || ""),
+      executablePath,
+      commandLine: commandLine.trim(),
+      creationDate: Number.isNaN(started.getTime()) ? null : started.toISOString()
+    });
+  }
+  return processes;
+}
+
 export async function queryRecentWindowsEvents(minutes = 15, limit = 120) {
   if (process.platform !== "win32") return [];
   const safeMinutes = Math.max(1, Math.min(360, Number(minutes) || 15));
@@ -195,7 +236,7 @@ export async function queryRecentWindowsEvents(minutes = 15, limit = 120) {
 
 export async function killProcessTree(pid) {
   if (process.platform !== "win32") {
-    const processes = process.platform === "linux" ? await queryLinuxProcesses() : [];
+    const processes = await queryProcesses();
     const children = new Map();
     for (const item of processes) {
       const parentPid = Number(item.parentProcessId);
@@ -232,7 +273,7 @@ export async function killProcessTree(pid) {
 export async function recoverUncleanSessions({
   logsRoot,
   internalRoot,
-  queryProcesses = queryWindowsProcesses,
+  queryProcesses: listProcesses = queryProcesses,
   killProcess = killProcessTree,
   now = () => new Date()
 }) {
@@ -248,7 +289,7 @@ export async function recoverUncleanSessions({
   if (!sessionNames.length) return [];
 
   let processes = [];
-  try { processes = await queryProcesses(); }
+  try { processes = await listProcesses(); }
   catch (error) {
     return [{ type: "recovery-scan-error", message: error instanceof Error ? error.message : String(error) }];
   }

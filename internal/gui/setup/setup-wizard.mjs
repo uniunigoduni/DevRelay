@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { electronSpawnEnvironment } from "../electron-environment.mjs";
+import { ensureNotoSansMono } from "../font-setup.mjs";
 import {
   connectionLabel,
   connectionPublicUrl,
@@ -27,14 +28,15 @@ const stateDir = path.join(internalRoot, ".devrelay");
 const setupPort = 7319;
 const electronHostPath = path.join(guiDir, "electron-host.cjs");
 const windowStatePath = path.join(stateDir, "setup-window-state.json");
+const mainWindowStatePath = path.join(stateDir, "window-state.json");
 const setupActionsPath = path.join(internalRoot, "scripts", "DevRelay-SetupActions.ps1");
 const providerActionsPath = path.join(setupDir, "provider-actions-cli.mjs");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const mainGuiPath = path.join(guiDir, "devrelay-gui.mjs");
 const mainGuiOrigin = "http://127.0.0.1:7318";
 
-if (process.platform !== "win32" && process.platform !== "linux") {
-  throw new Error(`The DevRelay setup GUI currently supports Windows and Linux, not ${process.platform}.`);
+if (!["win32", "linux", "darwin"].includes(process.platform)) {
+  throw new Error(`The DevRelay setup GUI currently supports Windows, Linux, and macOS, not ${process.platform}.`);
 }
 
 let currentSetup = await ensureSetupState(internalRoot);
@@ -129,7 +131,8 @@ async function startMainGuiForRegistration() {
   let mainState = await readMainGuiState();
   if (!mainState) {
     const child = spawn(process.execPath, [mainGuiPath], {
-      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore"
+      cwd: internalRoot, windowsHide: true, detached: true, stdio: "ignore",
+      env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" }
     });
     child.unref();
   }
@@ -176,7 +179,7 @@ async function runSetupAction(action, input = undefined, options = {}) {
   const inputPath = input === undefined ? null : path.join(stateDir, `setup-input-${randomUUID()}.json`);
   if (inputPath) await writeFile(inputPath, JSON.stringify(input), { encoding: "utf8", mode: 0o600 });
   return await new Promise((resolve, reject) => {
-    const useNodeActions = process.platform === "linux";
+    const useNodeActions = process.platform !== "win32";
     const args = useNodeActions
       ? [providerActionsPath, action, String(port), inputPath ?? ""]
       : ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", setupActionsPath, "-Action", action, "-Port", String(port), ...(inputPath ? ["-InputPath", inputPath] : [])];
@@ -235,7 +238,7 @@ const linkTargets = {
   "openai-api-keys": "https://platform.openai.com/settings/organization/api-keys",
   "openai-issue-71": "https://github.com/openai/tunnel-client/issues/71",
   "chatgpt-settings": "https://chatgpt.com/#settings/Connectors",
-  "tailscale-install": "https://tailscale.com/kb/1031/install-linux"
+  "tailscale-install": process.platform === "darwin" ? "https://tailscale.com/download/mac" : "https://tailscale.com/kb/1031/install-linux"
 };
 
 async function openLink(target) {
@@ -456,7 +459,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && url.pathname === "/api/state") return sendJson(res, 200, await apiState());
     if (req.method === "GET" && url.pathname === "/api/progress") {
-      return sendJson(res, 200, { busy, busyMessage, busyNeedsUser, approvalUrl, error: lastError });
+      return sendJson(res, 200, { busy, busyMessage, busyNeedsUser, approvalUrl, error: lastError, registrationReady: Boolean(registrationRuntime) });
     }
     if (busy && req.method === "POST" && !["/api/window-close", "/api/abort", "/api/open-approval"].includes(url.pathname)) {
       return sendJson(res, 409, { error: "Setup is busy." });
@@ -515,6 +518,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function launchWindow() {
+  await ensureNotoSansMono(stateDir).catch((error) => process.stderr.write(`Noto Sans Mono setup failed: ${error.message}\n`));
   const url = `http://127.0.0.1:${setupPort}/`;
   const hostArgs = [
     electronHostPath,
@@ -526,6 +530,7 @@ async function launchWindow() {
     "--devrelay-width", "760", "--devrelay-height", "620",
     "--devrelay-min-width", "560", "--devrelay-min-height", "480"
   ];
+  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("--devrelay-cascade-from", mainWindowStatePath);
   windowHost = spawn(electronPath, hostArgs, {
     cwd: internalRoot, detached: process.platform !== "win32", env: electronSpawnEnvironment(), stdio: "ignore"
   });

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-theme="white-soft">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <title>DevRelay</title>
+  <style>
+    :root {
+      --window: #ffffff; --text: #2b2b2b; --muted: #707070; --hover: #f2f2f2; --pressed: #e5e5e5;
+    }
+    :root[data-theme="black-soft"] {
+      --window: #000000; --text: #d6d6d6; --muted: #8a8a8a; --hover: #181818; --pressed: #282828;
+    }
+    html, body {
+      height: 100%; margin: 0; overflow: hidden; background: var(--window);
+      font-family: "Noto Sans Mono", Consolas, monospace; user-select: none; -webkit-user-select: none;
+    }
+    .titlebar { display: flex; align-items: center; height: 36px; -webkit-app-region: drag; }
+    .title {
+      flex: 1; min-width: 0; margin-left: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+      color: var(--muted); font-size: 13px; font-weight: 600;
+    }
+    button { -webkit-app-region: no-drag; margin: 0; padding: 0; border: 0; font: inherit; cursor: pointer; }
+    button:disabled { cursor: default; }
+    [hidden] { display: none !important; }
+    .power {
+      width: 76px; height: 26px; margin: 5px 6px 5px 0; border-radius: 13px;
+      background: #b42318; color: #ffffff; font-size: 11px; font-weight: 700;
+    }
+    .power.active { background: #d92d20; }
+    .power:enabled:hover { opacity: .88; }
+    .power:enabled:active { opacity: .72; }
+    .chrome-button {
+      display: grid; place-items: center; width: 40px; height: 36px;
+      background: transparent; color: var(--muted);
+    }
+    .chrome-button:enabled:hover { background: var(--hover); color: var(--text); }
+    .chrome-button:enabled:active { background: var(--pressed); }
+    .close:enabled:hover { background: #c42b1c; color: #ffffff; }
+    .close:enabled:active { background: #8e1b10; color: #ffffff; }
+    .glyph { font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 10px; line-height: 1; }
+    .settings .glyph { font-size: 15px; }
+    svg { display: block; fill: none; stroke: currentColor; stroke-width: 1; }
+    /* The WPF host drew Segoe Fluent Icons glyphs; other platforms get matching SVG outlines. */
+    :root.win32 svg, :root:not(.win32) .glyph { display: none; }
+    :root.maximized .maximize-icon, :root:not(.maximized) .restore-icon { display: none; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div id="title" class="title">DevRelay</div>
+    <button id="power" class="power" type="button" hidden>START</button>
+    <button id="settings" class="chrome-button settings" type="button" title="Settings" aria-label="Settings" hidden>
+      <span class="glyph">&#xE713;</span>
+      <svg width="16" height="16" viewBox="0 0 16 16" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6.35 2.91 L6.65 1.03 A7.1 7.1 0 0 1 9.35 1.03 L9.65 2.91 A5.35 5.35 0 0 1 10.43 3.23 L11.97 2.11 A7.1 7.1 0 0 1 13.89 4.03 L12.77 5.57 A5.35 5.35 0 0 1 13.09 6.35 L14.97 6.65 A7.1 7.1 0 0 1 14.97 9.35 L13.09 9.65 A5.35 5.35 0 0 1 12.77 10.43 L13.89 11.97 A7.1 7.1 0 0 1 11.97 13.89 L10.43 12.77 A5.35 5.35 0 0 1 9.65 13.09 L9.35 14.97 A7.1 7.1 0 0 1 6.65 14.97 L6.35 13.09 A5.35 5.35 0 0 1 5.57 12.77 L4.03 13.89 A7.1 7.1 0 0 1 2.11 11.97 L3.23 10.43 A5.35 5.35 0 0 1 2.91 9.65 L1.03 9.35 A7.1 7.1 0 0 1 1.03 6.65 L2.91 6.35 A5.35 5.35 0 0 1 3.23 5.57 L2.11 4.03 A7.1 7.1 0 0 1 4.03 2.11 L5.57 3.23 A5.35 5.35 0 0 1 6.35 2.91Z"/>
+        <circle cx="8" cy="8" r="2.4"/>
+      </svg>
+    </button>
+    <button id="minimize" class="chrome-button" type="button" title="Minimize" aria-label="Minimize">
+      <span class="glyph">&#xE921;</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><path d="M0 5.5H10"/></svg>
+    </button>
+    <button id="maximize" class="chrome-button" type="button" title="Maximize / Restore" aria-label="Maximize / Restore">
+      <span class="glyph maximize-icon">&#xE922;</span>
+      <span class="glyph restore-icon">&#xE923;</span>
+      <svg class="maximize-icon" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg>
+      <svg class="restore-icon" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5V1.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/><rect x=".5" y="2.5" width="7" height="7" rx="1"/></svg>
+    </button>
+    <button id="close" class="chrome-button close" type="button" title="Close" aria-label="Close">
+      <span class="glyph">&#xE8BB;</span>
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M.5 .5l9 9M9.5 .5l-9 9"/></svg>
+    </button>
+  </div>
+  <script>
+    const chrome = window.devrelayChrome;
+    const query = new URLSearchParams(location.search);
+    const byId = (id) => document.getElementById(id);
+    const root = document.documentElement;
+    root.classList.toggle("win32", query.get("platform") === "win32");
+    byId("title").textContent = query.get("title") || "DevRelay";
+    document.title = byId("title").textContent;
+    if (query.get("mode") === "main") {
+      byId("power").hidden = false;
+      byId("settings").hidden = false;
+    }
+    byId("power").addEventListener("click", () => chrome.power());
+    byId("settings").addEventListener("click", () => chrome.settings());
+    byId("minimize").addEventListener("click", () => chrome.minimize());
+    byId("maximize").addEventListener("click", () => chrome.toggleMaximize());
+    byId("close").addEventListener("click", () => chrome.close());
+    chrome.onState((state) => {
+      root.dataset.theme = state.theme;
+      root.classList.toggle("maximized", state.maximized);
+      const power = byId("power");
+      power.textContent = state.active ? "STOP" : "START";
+      power.classList.toggle("active", state.active);
+      power.disabled = !state.canPower;
+      byId("settings").disabled = !state.settingsEnabled;
+    });
+  </script>
+</body>
+</html>

@@ -26,7 +26,7 @@ If a machine migration loses only the DCR client file, an authorization request 
 
 ## OpenAI Secure Tunnel credentials
 
-The OpenAI runtime API key is accepted by the Setup wizard over its loopback-only local API and is forwarded to the setup action through a temporary mode-0600 file, not a command-line argument. Windows stores the key using DPAPI for the current Windows user. Linux stores it in a mode-0600 file under `.devrelay/`, whose directory is restricted to the current user.
+The OpenAI runtime API key is accepted by the Setup wizard over its loopback-only local API and is forwarded to the setup action through a temporary mode-0600 file, not a command-line argument. Windows stores the key using DPAPI for the current Windows user. Linux and macOS store it in a mode-0600 file under `.devrelay/`, whose directory is restricted to the current user.
 
 The Tunnel ID is not treated as a secret. The runtime launcher is non-interactive; missing or invalid credentials direct the user back to Connection Setup instead of opening hidden console prompts.
 
@@ -34,7 +34,7 @@ The Tunnel ID is not treated as a secret. The runtime launcher is non-interactiv
 
 OpenAI `tunnel-client` and Cloudflare `cloudflared` are downloaded from their official release sources when missing. Where the release source supplies a SHA-256 digest, DevRelay verifies it before use.
 
-Tailscale is not embedded into the repository. Windows setup can download the official installer, verify the published SHA-256 when available, and start it with Windows elevation/UAC. Linux users install the official package for their distribution before setup. DevRelay itself should continue to run as the normal user.
+Tailscale is not embedded into the repository. Windows setup can download the official installer, verify the published SHA-256 when available, and start it with Windows elevation/UAC. Linux users install the official package for their distribution before setup, and macOS users install the Tailscale app. DevRelay itself should continue to run as the normal user.
 
 ## Operating-system permissions
 

@@ -22,11 +22,11 @@ The MCP endpoint is `http://127.0.0.1:7317/mcp`. Loopback bindings use the MCP S
 
 ## Connection providers
 
-The desktop launcher keeps the MCP server on loopback and supervises a selected remote-access provider from `.devrelay/setup.json`. The main GUI does not expose a connection Mode selector; connection selection and provider setup live in the separate Connection Setup wizard. Linux provider orchestration is implemented in Node.js; Windows retains PowerShell for Windows-specific installation and credential storage.
+The desktop launcher keeps the MCP server on loopback and supervises a selected remote-access provider from `.devrelay/setup.json`. The main GUI does not expose a connection Mode selector; connection selection and provider setup live in the separate Connection Setup wizard. Linux and macOS provider orchestration is implemented in Node.js; Windows retains PowerShell for Windows-specific installation and credential storage.
 
 ### OpenAI Secure Tunnel
 
-The official OpenAI `tunnel-client` connects outbound to OpenAI and forwards the local MCP endpoint without requiring a public hostname. DevRelay stores the selected tunnel ID in machine-local setup files. Windows protects the runtime API key with DPAPI; Linux stores it in a mode-0600 file under the user-only `.devrelay` directory.
+The official OpenAI `tunnel-client` connects outbound to OpenAI and forwards the local MCP endpoint without requiring a public hostname. DevRelay stores the selected tunnel ID in machine-local setup files. Windows protects the runtime API key with DPAPI; Linux and macOS store it in a mode-0600 file under the user-only `.devrelay` directory.
 
 The wizard prepares a `sample_mcp_remote_no_auth` profile. At runtime DevRelay starts the local MCP listener first, then runs `tunnel-client doctor --explain` before starting the tunnel. The runtime worker remains non-interactive and refuses to prompt for missing credentials.
 
@@ -42,7 +42,7 @@ After a machine migration, DevRelay can reconstruct a missing DCR client registr
 
 #### Tailscale Funnel
 
-Tailscale Funnel is the recommended HTTPS provider for users without a custom domain. Windows setup can run the official Tailscale installer when needed. Linux users install the official package for their distribution before setup; both platforms use the normal Tailscale browser sign-in flow. The prepared endpoint uses the machine's stable tailnet DNS name under `*.ts.net`.
+Tailscale Funnel is the recommended HTTPS provider for users without a custom domain. Windows setup can run the official Tailscale installer when needed. Linux users install the official package for their distribution before setup, and macOS users install the Tailscale app; every platform uses the normal Tailscale browser sign-in flow. The prepared endpoint uses the machine's stable tailnet DNS name under `*.ts.net`.
 
 At runtime DevRelay supervises the Funnel process with the local HTTP listener. Provider-specific account/policy requirements remain Tailscale-controlled, so live interoperability should be validated with the target tailnet.
 

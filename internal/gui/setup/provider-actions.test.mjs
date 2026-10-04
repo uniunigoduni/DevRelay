@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { copyPrivateCredential, ensureCloudflareCredential, extractOpenAITunnelClientArchive, selectOpenAITunnelClientAsset } from "./provider-actions.mjs";
+import {
+  cloudflaredAssetName, copyPrivateCredential, ensureCloudflareCredential, extractCloudflaredArchive,
+  extractOpenAITunnelClientArchive, selectOpenAITunnelClientAsset, tailscalePath
+} from "./provider-actions.mjs";
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -62,8 +66,51 @@ test("OpenAI tunnel-client release selection excludes bundled runtime variants",
     { name: "tunnel-client-v0.0.15-linux-arm64.zip" },
     { name: "tunnel-client-v0.0.15-linux-amd64.zip" }
   ];
-  assert.equal(selectOpenAITunnelClientAsset(assets, "amd64"), assets[3]);
-  assert.equal(selectOpenAITunnelClientAsset(assets, "arm64"), assets[2]);
+  assert.equal(selectOpenAITunnelClientAsset(assets, "amd64", "linux"), assets[3]);
+  assert.equal(selectOpenAITunnelClientAsset(assets, "arm64", "linux"), assets[2]);
+});
+
+test("provider downloads select the macOS release assets", () => {
+  const assets = [
+    { name: "tunnel-client-runtime-v0.0.15-darwin-arm64.zip" },
+    { name: "tunnel-client-v0.0.15-linux-arm64.zip" },
+    { name: "tunnel-client-v0.0.15-darwin-arm64.zip" }
+  ];
+  assert.equal(selectOpenAITunnelClientAsset(assets, "arm64", "darwin"), assets[2]);
+  assert.equal(selectOpenAITunnelClientAsset(assets, "amd64", "darwin"), null);
+  assert.equal(cloudflaredAssetName("darwin", "arm64"), "cloudflared-darwin-arm64.tgz");
+  assert.equal(cloudflaredAssetName("linux", "amd64"), "cloudflared-linux-amd64");
+});
+
+test("cloudflared macOS archives yield only a regular cloudflared executable", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devrelay-cloudflared-tgz-"));
+  const tools = path.join(root, "tools");
+  const destination = path.join(tools, "cloudflared-darwin-arm64");
+  try {
+    await mkdir(path.join(root, "src"));
+    await mkdir(tools);
+    await writeFile(path.join(root, "src", "cloudflared"), "test executable contents");
+    execFileSync("tar", ["-czf", path.join(root, "good.tgz"), "-C", path.join(root, "src"), "cloudflared"]);
+    await extractCloudflaredArchive(path.join(root, "good.tgz"), destination);
+    assert.equal(await readFile(destination, "utf8"), "test executable contents");
+    assert.equal((await stat(destination)).mode & 0o777, 0o700);
+
+    await writeFile(path.join(root, "src", "other"), "unrelated");
+    execFileSync("tar", ["-czf", path.join(root, "bad.tgz"), "-C", path.join(root, "src"), "other"]);
+    await assert.rejects(extractCloudflaredArchive(path.join(root, "bad.tgz"), path.join(tools, "rejected")), /did not contain a cloudflared executable/);
+    assert.deepEqual(await readdir(tools), ["cloudflared-darwin-arm64"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Tailscale lookup falls back to the macOS app CLI only on macOS", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "devrelay-tailscale-app-"));
+  const appCli = path.join(root, "Tailscale");
+  try {
+    await writeFile(appCli, "#!/bin/sh\n", { mode: 0o700 });
+    assert.equal(await tailscalePath({ env: { PATH: "" }, platform: "darwin", appCli }), appCli);
+    assert.equal(await tailscalePath({ env: { PATH: "" }, platform: "linux", appCli }), null);
+    assert.equal(await tailscalePath({ env: { PATH: "" }, platform: "darwin", appCli: path.join(root, "missing") }), null);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("Cloudflare credentials copy into a private directory with restricted permissions", async () => {

@@ -6,7 +6,7 @@ The design rule is simple: **if a task can already be done by a CLI, DevRelay do
 
 ## Status
 
-DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. Windows remains the supported release target. Linux support is being implemented; it is not yet a supported release target.
+DevRelay is under active development. Published GitHub Releases are the supported distribution and automatic-update channel; `main` may contain unreleased changes. Windows remains the supported release target. Linux and macOS support is being implemented; neither is a supported release target yet. Both start the desktop GUI from a Git checkout with `DevRelay.sh` (Linux) or `DevRelay.app` (macOS).
 
 ## Features
 
@@ -17,7 +17,7 @@ DevRelay is under active development. Published GitHub Releases are the supporte
 - Managed long-running pipe processes plus opt-in PTY/ConPTY terminal sessions.
 - Cursor-based incremental log reads.
 - Rolling in-memory output buffers.
-- Process-tree termination for managed Windows and Linux processes.
+- Process-tree termination for managed Windows, Linux, and macOS processes.
 - Stable per-device identity with an auto-generated hardware-based default name, editable display name, aliases, and local online metadata.
 - The MCP core has no database, agent loop, general-purpose desktop automation, or embedded tunnel. A separate Node/Electron GUI provides the human-facing control and observation surface for setup, authorization, lifecycle, settings, and diagnostics.
 - The MCP core has five direct runtime dependencies: the MCP server SDK, its Node adapter, Zod, `iconv-lite` for explicit legacy-code-page decoding, and `node-pty` for PTY/ConPTY. The desktop GUI also uses Electron for its native window host.
@@ -164,9 +164,13 @@ On Windows, `DevRelay.exe` (or the `DevRelay.cmd` compatibility launcher) checks
 
 An update is applied only when the checkout uses the official DevRelay `origin`, the Git worktree is clean, and the current commit can fast-forward to the release commit. Development checkouts that are ahead of a release, diverged checkouts, forks, dirty worktrees, offline machines, and non-Git source archives are left untouched and start normally. Machine-local `.devrelay` state is not part of Git and is preserved.
 
-## Windows double-click launcher
+## Desktop launchers
 
-For normal Windows use, double-click `DevRelay.exe`. `DevRelay.cmd` remains available as a compatibility fallback. Before the main control window starts, DevRelay checks the latest published Release and then verifies machine-local connection setup. The Electron window uses the DevRelay AppUserModelID so it can be pinned to the taskbar as DevRelay.
+- **Windows**: double-click `DevRelay.exe`. `DevRelay.cmd` remains available as a compatibility fallback. Before any window opens, DevRelay checks the latest published Release, installs npm dependencies and builds when needed, and then verifies machine-local connection setup. The Electron window uses the DevRelay AppUserModelID so it can be pinned to the taskbar as DevRelay.
+- **macOS**: double-click `DevRelay.app` in the checkout. It runs `DevRelay.sh`.
+- **Linux**: run `./DevRelay.sh`. `./DevRelay.sh --install-desktop-entry` adds a DevRelay entry to the desktop application menu.
+
+`DevRelay.sh` uses the login shell's `PATH`, so Node.js, npm, and provider CLIs resolve as they do in a terminal. It installs npm dependencies and builds when needed before the first window opens, and logs to `internal/.devrelay/launcher.log`. Keep the launchers inside the checkout; on macOS, add `DevRelay.app` to the Dock or make an alias instead of moving it. A checkout downloaded as a ZIP is quarantined by macOS, so clone it with Git or remove the quarantine attribute before opening `DevRelay.app`.
 
 A fresh install opens a separate light-theme **DevRelay Setup** window before the main GUI. Connection setup is chosen there rather than through a `Mode` field in the main window:
 
@@ -179,7 +183,7 @@ The wizard also shows the ChatGPT registration steps. Secure Tunnel uses a Tunne
 
 After setup, the main GUI shows the current Connection and endpoint. `Connection Setup...` reopens the separate wizard while DevRelay is stopped. The current connection stays active while a replacement is being prepared; once preparation succeeds, the new connection is committed before the ChatGPT registration guide appears. Cancel/close before that point restores the previous local connection files. Advanced Reset removes DevRelay's local connection configuration but does not uninstall Tailscale or automatically delete provider-side tunnel resources.
 
-The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. Start/Stop and Settings stay in the app toolbar beneath the native window title bar. The window remembers its size and supports a 480x480 minimum. It uses Noto Sans Mono when available, with `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped. An incoming HTTPS OAuth request shows a blocking approval dialog; on Wayland, the desktop may prevent an app from taking focus, so DevRelay also sends a desktop notification. Closing the GUI stops DevRelay and its active connection process.
+The GUI stays visible while DevRelay is available. The body contains `Command log` and `Server log`, with a draggable divider whose ratio is remembered locally. The window draws its own title bar instead of the OS frame: START/STOP, Settings, minimize, maximize/restore, and close. It remembers its size and position and supports a 480x480 minimum. DevRelay installs Noto Sans Mono for the current user when it is missing (a pinned Google Fonts file, verified by SHA-256) and uses `#FFFFFF Soft` (default) and `#000000 Soft` palettes. Device/port/auto-start settings can be edited while stopped. An incoming HTTPS OAuth request shows a blocking approval dialog; on Wayland, the desktop may prevent an app from taking focus, so DevRelay also sends a desktop notification. Closing the GUI stops DevRelay and its active connection process.
 
 Each visible window launch writes a session under `internal/.devrelay/logs/`; session diagnostics include server/command logs plus controller/launcher lifecycle and process-identity records used to diagnose and safely recover unclean exits. The latest three sessions are retained, plus up to five recent unclean/diagnostic sessions for postmortem analysis. Machine-local settings, setup state, caches, logs, provider state, window state, and credentials remain under `.devrelay` and are excluded from Git.
 

@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { appendFile, access, chmod, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuild } from "./prepare.mjs";
+import { tailscalePath } from "./setup/provider-actions.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -54,10 +55,6 @@ const startedAt = now();
 async function ensureDirectory(folder) { await mkdir(folder, { recursive: true, mode: 0o700 }); }
 async function readJson(filePath) {
   try { return JSON.parse(await readFile(filePath, "utf8")); } catch { return null; }
-}
-async function writeJson(filePath, value) {
-  await ensureDirectory(path.dirname(filePath));
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function spawnCommand(file, args, { cwd = internalRoot, env = process.env, onOutput = () => {}, logOutput = true } = {}) {
@@ -162,55 +159,18 @@ async function findExecutable(name) {
 async function providerExecutable(name, stateName, archSuffix) {
   const fromPath = await findExecutable(name);
   if (fromPath) return fromPath;
-  const local = path.join(stateDir, "tools", stateName, `${name}-linux-${archSuffix}`);
+  const local = path.join(stateDir, "tools", stateName, `${name}-${process.platform}-${archSuffix}`);
   try { await access(local, 1); return local; } catch {}
   throw new Error(`${name} is not installed. Reopen Connection Setup.`);
 }
 function platformArch() {
   if (process.arch === "x64") return "amd64";
   if (process.arch === "arm64") return "arm64";
-  throw new Error(`Unsupported Linux architecture: ${process.arch}`);
+  throw new Error(`Unsupported ${process.platform} architecture: ${process.arch}`);
 }
 function getDnsName(status) { return String(status?.Self?.DNSName ?? "").replace(/\.+$/, "") || null; }
 
-async function ensureBuild() {
-  const packagePath = path.join(internalRoot, "package.json");
-  const lockPath = path.join(internalRoot, "package-lock.json");
-  const entryPath = path.join(internalRoot, "dist", "src", "main.js");
-  const nodeModules = path.join(internalRoot, "node_modules");
-  const statePath = path.join(stateDir, "launcher-state.json");
-  const state = await readJson(statePath) ?? {};
-  let lockHash = "missing";
-  try { lockHash = createHash("sha256").update(await readFile(lockPath)).digest("hex"); } catch {}
-  let shouldInstall = !await exists(nodeModules) || state.packageLockHash !== lockHash;
-  if (shouldInstall) {
-    log("Installing npm dependencies...");
-    await runCommand("npm", ["ci"], { env: process.env });
-  }
-  const entryStat = await stat(entryPath).catch(() => null);
-  const inputs = [packagePath, path.join(internalRoot, "tsconfig.json"), ...await sourceFiles(path.join(internalRoot, "src"))];
-  let stale = !entryStat;
-  for (const file of inputs) {
-    const inputStat = await stat(file).catch(() => null);
-    if (inputStat && entryStat && inputStat.mtimeMs > entryStat.mtimeMs) { stale = true; break; }
-  }
-  if (stale) {
-    log("Building DevRelay...");
-    await runCommand("npm", ["run", "build"], { env: process.env });
-  }
-  await writeJson(statePath, { packageLockHash: lockHash, lastPreparedAt: now() });
-}
-
 async function exists(filePath) { try { await access(filePath); return true; } catch { return false; } }
-async function sourceFiles(folder) {
-  const files = [];
-  for (const entry of await readdir(folder, { withFileTypes: true }).catch(() => [])) {
-    const current = path.join(folder, entry.name);
-    if (entry.isDirectory()) files.push(...await sourceFiles(current));
-    else if (entry.isFile() && current.endsWith(".ts")) files.push(current);
-  }
-  return files;
-}
 
 async function startDevRelay(env) {
   if (await isPortOpen()) throw new Error(`TCP port ${port} is already in use. Stop the existing listener or change the Port setting.`);
@@ -289,7 +249,7 @@ async function runLauncher() {
   await chmod(stateDir, 0o700).catch(() => {});
   appendLifecycle("launcher.start", { parentPid: process.ppid, startedAt, port });
   await writeProcessState("launcher-started");
-  await ensureBuild();
+  await ensureBuild({ log, run: (file, args) => runCommand(file, args, { env: process.env }) });
   const setup = await readJson(path.join(stateDir, "setup.json"));
   if (!setup?.completed || !setup.connection) throw new Error("DevRelay connection setup is incomplete. Open Connection Setup first.");
   currentConnection = setup.connection;
@@ -330,7 +290,7 @@ async function runLauncher() {
     publicUrl = quick.publicUrl;
     tunnel = quick.running;
   } else if (connection.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (!tailscale) throw new Error("Tailscale is not installed. Reopen Connection Setup.");
     const statusResult = await spawnCommand(tailscale, ["status", "--json"], { logOutput: false }).completion;
     if (statusResult.code !== 0) throw new Error("Tailscale is not signed in.");
@@ -356,7 +316,7 @@ async function runLauncher() {
   if (!runtime) runtime = await startDevRelay(runtimeEnv);
 
   if (connection.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     tunnel = await startTailscaleTunnel(tailscale);
     await new Promise((resolve) => setTimeout(resolve, 1000));
     if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error("Tailscale Funnel exited during startup.");
@@ -393,7 +353,7 @@ async function shutdown(signal) {
   appendLifecycle("launcher.signal", { signal });
   await stopChildren();
   if (currentConnection?.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (tailscale) await spawnCommand(tailscale, ["funnel", "reset"], { logOutput: false }).completion.catch(() => {});
   }
 }
@@ -414,7 +374,7 @@ try {
   if (tracked.runtime) appendLifecycle("runtime.clear", { pid: tracked.runtime.pid, reason: "launcher-exit" });
   if (tracked.tunnel) appendLifecycle("tunnel.clear", { pid: tracked.tunnel.pid, reason: "launcher-exit" });
   if (currentConnection?.provider === "tailscale") {
-    const tailscale = await findExecutable("tailscale");
+    const tailscale = await tailscalePath();
     if (tailscale) await spawnCommand(tailscale, ["funnel", "reset"], { logOutput: false }).completion.catch(() => {});
   }
   tracked.runtime = null;

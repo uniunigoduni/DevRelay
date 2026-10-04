@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,11 @@ import { inflateRawSync } from "node:zlib";
 
 const setupDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(setupDir, "../..");
+const platformLabel = process.platform === "darwin" ? "macOS" : "Linux";
+const tailscaleInstallHint = process.platform === "darwin"
+  ? "Install the Tailscale app for macOS"
+  : "Install the official Tailscale package for your Linux distribution";
+const MACOS_TAILSCALE_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 const CRC32_TABLE = new Uint32Array(256);
 for (let index = 0; index < CRC32_TABLE.length; index += 1) {
   let value = index;
@@ -21,8 +26,8 @@ function platformArch(platform, arch) {
   throw new Error(`Unsupported ${platform} architecture: ${arch}`);
 }
 
-export function selectOpenAITunnelClientAsset(assets, arch) {
-  const pattern = new RegExp(`^tunnel-client-v[^/]+-linux-${arch}\\.zip$`, "i");
+export function selectOpenAITunnelClientAsset(assets, arch, platform = process.platform) {
+  const pattern = new RegExp(`^tunnel-client-v[^/]+-${platform}-${arch}\\.zip$`, "i");
   return assets.find((asset) => pattern.test(String(asset.name ?? ""))) ?? null;
 }
 
@@ -247,8 +252,11 @@ function parseJsonArray(text) {
   catch { throw new Error("External command returned invalid JSON."); }
 }
 
-async function tailscalePath() {
-  return await findExecutable("tailscale");
+// The macOS app bundles its CLI without adding it to PATH.
+export async function tailscalePath({ env = process.env, platform = process.platform, appCli = MACOS_TAILSCALE_CLI } = {}) {
+  const fromPath = await findExecutable("tailscale", env);
+  if (fromPath || platform !== "darwin") return fromPath;
+  try { await access(appCli, 1); return appCli; } catch { return null; }
 }
 
 async function tailscaleStatus(executable) {
@@ -261,9 +269,25 @@ function tailscaleDnsName(status) {
   return String(status?.Self?.DNSName ?? "").replace(/\.+$/, "") || null;
 }
 
+export function cloudflaredAssetName(platform, arch) {
+  return platform === "darwin" ? `cloudflared-darwin-${arch}.tgz` : `cloudflared-linux-${arch}`;
+}
+
 function cloudflaredPath(stateDir) {
   const arch = platformArch(process.platform, process.arch);
-  return path.join(stateDir, "tools", "cloudflared", `cloudflared-linux-${arch}`);
+  return path.join(stateDir, "tools", "cloudflared", `cloudflared-${process.platform}-${arch}`);
+}
+
+export async function extractCloudflaredArchive(archivePath, destination) {
+  const workDir = await mkdtemp(path.join(path.dirname(destination), ".extract-"));
+  try {
+    await runChecked("tar", ["-xzf", archivePath, "-C", workDir]);
+    const extracted = path.join(workDir, "cloudflared");
+    const info = await lstat(extracted).catch(() => null);
+    if (!info?.isFile()) throw new Error("The cloudflared archive did not contain a cloudflared executable.");
+    await chmod(extracted, 0o700);
+    await rename(extracted, destination);
+  } finally { await rm(workDir, { recursive: true, force: true }); }
 }
 
 async function ensureCloudflared(stateDir) {
@@ -274,15 +298,19 @@ async function ensureCloudflared(stateDir) {
 
   const arch = platformArch(process.platform, process.arch);
   const release = await fetchJson("https://api.github.com/repos/cloudflare/cloudflared/releases/latest");
-  const assetName = `cloudflared-linux-${arch}`;
+  const assetName = cloudflaredAssetName(process.platform, arch);
   const asset = release.assets?.find((item) => item.name === assetName);
-  if (!asset) throw new Error(`No official cloudflared Linux ${arch} release was found.`);
+  if (!asset) throw new Error(`No official cloudflared ${platformLabel} ${arch} release was found.`);
   await mkdir(path.dirname(executable), { recursive: true, mode: 0o700 });
   const temporary = `${executable}.download`;
   try {
     await downloadAsset(asset, temporary);
-    await chmod(temporary, 0o700);
-    await rename(temporary, executable);
+    if (assetName.endsWith(".tgz")) {
+      await extractCloudflaredArchive(temporary, executable);
+    } else {
+      await chmod(temporary, 0o700);
+      await rename(temporary, executable);
+    }
   } finally { await rm(temporary, { force: true }); }
   return executable;
 }
@@ -293,7 +321,7 @@ async function ensureOpenAIClient(root = internalRoot) {
   const arch = platformArch(process.platform, process.arch);
   const release = await fetchJson("https://api.github.com/repos/openai/tunnel-client/releases/latest");
   const asset = selectOpenAITunnelClientAsset(release.assets ?? [], arch);
-  if (!asset) throw new Error(`No official OpenAI tunnel-client Linux ${arch} archive was found.`);
+  if (!asset) throw new Error(`No official OpenAI tunnel-client ${platformLabel} ${arch} archive was found.`);
   const toolDir = path.dirname(binary);
   await mkdir(toolDir, { recursive: true, mode: 0o700 });
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "devrelay-openai-tunnel-"));
@@ -311,7 +339,7 @@ export async function runProviderAction(action, input = {}, {
   onOutput = () => {},
   signal
 } = {}) {
-  if (process.platform !== "linux") throw new Error("The Node provider setup path currently targets Linux.");
+  if (!["linux", "darwin"].includes(process.platform)) throw new Error("The Node provider setup path currently targets Linux and macOS.");
   const stateDir = path.join(root, ".devrelay");
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   await chmod(stateDir, 0o700).catch(() => {});
@@ -345,7 +373,7 @@ export async function runProviderAction(action, input = {}, {
   }
 
   if (action === "InstallTailscale") {
-    throw new Error("Install the official Tailscale package for your Linux distribution, then reopen Connection Setup.");
+    throw new Error(`${tailscaleInstallHint}, then reopen Connection Setup.`);
   }
 
   if (action === "ConfigureOpenAI") {
@@ -365,7 +393,7 @@ export async function runProviderAction(action, input = {}, {
 
   if (action === "TailscaleLogin" || action === "PrepareTailscale") {
     const executable = await tailscalePath();
-    if (!executable) throw new Error("Tailscale is not installed. Install it with your distribution package manager first.");
+    if (!executable) throw new Error(`Tailscale is not installed. ${tailscaleInstallHint} first.`);
     if (action === "TailscaleLogin") {
       const login = await run(executable, ["login", "--timeout=10m"], { onOutput, signal });
       if (login.code !== 0) throw new Error("Tailscale sign-in did not complete. Finish the browser approval, then try again.");
@@ -454,5 +482,5 @@ export async function runProviderAction(action, input = {}, {
     return { ok: true };
   }
 
-  throw new Error(`Unknown Linux setup action: ${action}`);
+  throw new Error(`Unknown setup action: ${action}`);
 }

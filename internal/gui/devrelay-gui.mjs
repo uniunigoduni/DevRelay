@@ -7,9 +7,10 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { electronSpawnEnvironment } from "./electron-environment.mjs";
+import { ensureNotoSansMono } from "./font-setup.mjs";
 import { connectionLabel, connectionPublicUrl, ensureSetupState } from "./setup/setup-state.mjs";
 import { classifyGuiHostHeartbeat, isGuiHostRecoverySignal, shouldResumeRuntimeAfterGuiRecovery } from "./gui-host-watchdog.mjs";
-import { queryRecentWindowsEvents, queryWindowsProcesses, recoverUncleanSessions } from "./session-recovery.mjs";
+import { queryProcesses, queryRecentWindowsEvents, recoverUncleanSessions } from "./session-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -18,11 +19,12 @@ const internalRoot = path.resolve(guiDir, "..");
 const publicDir = path.join(guiDir, "public");
 const stateDir = path.join(internalRoot, ".devrelay");
 const windowStatePath = path.join(stateDir, "window-state.json");
+const setupWindowStatePath = path.join(stateDir, "setup-window-state.json");
 const settingsPath = path.join(stateDir, "gui-settings.json");
 const devicePath = path.join(stateDir, "device.json");
 const updateStatePath = path.join(stateDir, "update-state.json");
 const launcherPath = path.join(internalRoot, "scripts", "DevRelay-Launcher.ps1");
-const linuxLauncherPath = path.join(guiDir, "linux-runtime.mjs");
+const posixLauncherPath = path.join(guiDir, "posix-runtime.mjs");
 const setupWizardPath = path.join(guiDir, "setup", "setup-wizard.mjs");
 const guiPort = 7318;
 const electronHostPath = path.join(guiDir, "electron-host.cjs");
@@ -41,8 +43,8 @@ async function existingGuiIsRunning() {
   });
 }
 if (await existingGuiIsRunning()) process.exit(0);
-if (process.platform !== "win32" && process.platform !== "linux") {
-  throw new Error(`The DevRelay desktop GUI currently supports Windows and Linux, not ${process.platform}.`);
+if (!["win32", "linux", "darwin"].includes(process.platform)) {
+  throw new Error(`The DevRelay desktop GUI currently supports Windows, Linux, and macOS, not ${process.platform}.`);
 }
 
 await mkdir(stateDir, { recursive: true });
@@ -231,7 +233,7 @@ function pushLog(target, message, level = "info") {
 async function captureDiagnosticSnapshot(reason, detail = {}) {
   try {
     const [processes, recentWindowsEvents] = await Promise.all([
-      queryWindowsProcesses(),
+      queryProcesses(),
       queryRecentWindowsEvents(15, 120).catch(() => [])
     ]);
     const knownPids = new Set([process.pid, runtime?.pid, windowHost?.pid, sessionMeta.launcher?.pid, sessionMeta.windowHost?.pid].filter(Number.isInteger));
@@ -382,7 +384,7 @@ async function startRuntime(reason = "user") {
   const launcherExe = process.platform === "win32" ? "powershell.exe" : process.execPath;
   const launcherArgs = process.platform === "win32"
     ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath, "-Port", String(settings.port)]
-    : [linuxLauncherPath, String(settings.port)];
+    : [posixLauncherPath, String(settings.port)];
 
   const usesOAuth = setup.connection.kind === "https";
   oauthControlSecret = usesOAuth ? `${randomUUID()}${randomUUID()}`.replaceAll("-", "") : null;
@@ -406,7 +408,7 @@ async function startRuntime(reason = "user") {
   const launcherRecord = {
     role: "launcher", pid: runtime.pid, startedAt: launcherStartedAt,
     executableName: path.basename(launcherExe), executablePath: launcherExe,
-    commandIncludes: process.platform === "win32" ? [launcherPath, "-Port", String(settings.port)] : [linuxLauncherPath, String(settings.port)]
+    commandIncludes: process.platform === "win32" ? [launcherPath, "-Port", String(settings.port)] : [posixLauncherPath, String(settings.port)]
   };
   await persistSessionMeta({ launcher: launcherRecord, runtimeState: "starting" });
   recordLifecycle("launcher.start", { pid: runtime.pid, startedAt: launcherStartedAt, port: settings.port });
@@ -499,7 +501,7 @@ async function stopRuntime(reason = "user") {
   state.stopping = true;
   pushLog(pluginLogs, `[GUI] Stopping runtime (${reason})...`);
   recordLifecycle("runtime.stop-request", { reason, launcherPid: child.pid });
-  const stopResult = await taskkill(child.pid, { graceful: process.platform === "linux" });
+  const stopResult = await taskkill(child.pid, { graceful: process.platform !== "win32" });
   recordLifecycle("runtime.stop-result", { reason, launcherPid: child.pid, ...stopResult });
   await new Promise((resolve) => setTimeout(resolve, 250));
   if (runtime === child) runtime = null;
@@ -636,7 +638,10 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 409, { error: "Stop DevRelay before changing connection setup." });
       }
       if (!setupProcess) {
-        setupProcess = spawn(process.execPath, [setupWizardPath], { cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore" });
+        setupProcess = spawn(process.execPath, [setupWizardPath], {
+          cwd: internalRoot, windowsHide: true, detached: process.platform !== "win32", stdio: "ignore",
+          env: { ...process.env, DEVRELAY_CASCADE_WINDOW: "1" }
+        });
         setupProcess.once("error", (error) => { pushLog(pluginLogs, `[GUI] Setup window failed: ${error.message}`, "error"); setupProcess = null; });
         setupProcess.once("exit", async () => {
           setupProcess = null;
@@ -670,7 +675,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 async function launchWindow() {
-  const url = `http://127.0.0.1:${guiPort}/?host=electron`;
+  await ensureNotoSansMono(stateDir).catch((error) => pushLog(pluginLogs, `[GUI] Noto Sans Mono setup failed: ${error.message}`, "warn"));
+  const url = `http://127.0.0.1:${guiPort}/`;
   windowLaunchedAt = Date.now();
   windowCloseRequestedAt = 0;
   lastHostHeartbeatAt = 0;
@@ -682,9 +688,10 @@ async function launchWindow() {
     "--devrelay-title", "DevRelay",
     "--devrelay-window-state", windowStatePath,
     "--devrelay-user-data", path.join(stateDir, "electron-main-profile"),
-    "--devrelay-width", "900", "--devrelay-height", "700",
+    "--devrelay-width", "780", "--devrelay-height", "560",
     "--devrelay-min-width", "480", "--devrelay-min-height", "480"
   ];
+  if (process.env.DEVRELAY_CASCADE_WINDOW === "1") hostArgs.push("--devrelay-cascade-from", setupWindowStatePath);
   const hostStartedAt = new Date().toISOString();
   windowHost = spawn(electronPath, hostArgs, {
     cwd: internalRoot, detached: process.platform !== "win32", env: electronSpawnEnvironment(), stdio: ["ignore", "pipe", "pipe"]
@@ -725,7 +732,7 @@ async function shutdown(reason) {
   const endedAt = new Date().toISOString();
   await persistSessionMeta({ endedAt, status: "closed", exitReason: reason, launcher: null });
   recordLifecycle("controller.shutdown-complete", { reason, endedAt });
-  if (setupProcess?.pid) await taskkill(setupProcess.pid, { graceful: process.platform === "linux" });
+  if (setupProcess?.pid) await taskkill(setupProcess.pid, { graceful: process.platform !== "win32" });
   await new Promise((resolve) => server.close(resolve));
   if (windowHost?.pid) await taskkill(windowHost.pid);
   process.exit(0);

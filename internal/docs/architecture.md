@@ -6,7 +6,7 @@ DevRelay exposes a development machine's existing command-line environment throu
 
 The architectural goal is to bring the MCP client to the development environment rather than recreate the development environment inside DevRelay. The MCP/process interface is the machine-facing execution path. The Electron GUI sits outside that execution surface as a local, human-facing control and observation plane for setup, authorization, configuration, lifecycle, and diagnostics.
 
-The GUI controllers, web interfaces, and Linux runtime/provider orchestration use Node.js. Windows keeps its existing PowerShell runtime supervisor and Windows-specific setup/release integration, including DPAPI, package installation, and bootstrap/update behavior, to preserve its established process and encoding semantics.
+The GUI controllers, web interfaces, and Linux/macOS runtime/provider orchestration use Node.js. Windows keeps its existing PowerShell runtime supervisor and Windows-specific setup/release integration, including DPAPI, package installation, and bootstrap/update behavior, to preserve its established process and encoding semantics.
 
 ```text
 MCP client
@@ -51,7 +51,7 @@ Every event receives a monotonically increasing cursor. `process_read` accepts t
 
 `exec` creates an ephemeral pipe process, closes stdin after optional input, waits for completion, and returns collected output.
 
-`process_start` creates a retained pipe or terminal session. Ordinary Windows pipe sessions stop with process-tree termination, and Linux recovery follows verified process identities through procfs before terminating a tree. PTY sessions are terminated through the PTY backend so ConPTY or the platform PTY receives a proper close and exit event.
+`process_start` creates a retained pipe or terminal session. Ordinary Windows pipe sessions stop with process-tree termination, and Linux/macOS recovery follows verified process identities (procfs on Linux, `ps` on macOS) before terminating a tree. PTY sessions are terminated through the PTY backend so ConPTY or the platform PTY receives a proper close and exit event.
 
 ## Transport separation
 

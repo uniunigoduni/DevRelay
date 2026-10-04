@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $GuiRoot = $PSScriptRoot
 $InternalRoot = Split-Path -Parent $GuiRoot
 $UpdateScript = Join-Path $InternalRoot "scripts\Update-DevRelayFromRelease.ps1"
+$LauncherScript = Join-Path $InternalRoot "scripts\DevRelay-Launcher.ps1"
 $GuiScript = Join-Path $GuiRoot "devrelay-gui.mjs"
 $SetupStateScript = Join-Path $GuiRoot "setup\setup-state.mjs"
 $SetupWizardScript = Join-Path $GuiRoot "setup\setup-wizard.mjs"
@@ -26,6 +27,10 @@ try {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $UpdateScript | Out-Null
   }
 
+  # The Electron windows load from node_modules, so install and build before any window starts.
+  # This also records the lockfile hash, so the first Start does not run npm ci under an open window.
+  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $LauncherScript -SetupOnly -NoTunnel | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "DevRelay dependency setup failed with exit code $LASTEXITCODE." }
   $node = Get-Command node.exe -ErrorAction Stop
 
   & $node.Source $SetupStateScript $InternalRoot | Out-Null
