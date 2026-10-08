@@ -51,6 +51,31 @@ test("OAuth protected resource metadata supports the MCP resource path", async (
   });
 });
 
+test("Claude registration rejects callbacks outside the exact hosted callback", async () => {
+  await withOAuthServer(async (base, oauth) => {
+    for (const redirectUri of [
+      "http://claude.ai/api/mcp/auth_callback",
+      "https://claude.ai/other",
+      "https://claude.ai/api/mcp/auth_callback?next=https://attacker.example",
+      "https://claude.ai/api/mcp/auth_callback#fragment",
+      "https://claude.ai:8443/api/mcp/auth_callback",
+      "https://attacker.claude.ai/api/mcp/auth_callback",
+      "https://claude.ai.attacker.example/api/mcp/auth_callback",
+      "https://claude.ai@attacker.example/api/mcp/auth_callback",
+      "https://attacker.example/api/mcp/auth_callback",
+      "http://localhost:3118/callback"
+    ]) {
+      const response = await fetch(`${base}/oauth/register`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: [redirectUri], token_endpoint_auth_method: "none" })
+      });
+      assert.equal(response.status, 400, redirectUri);
+      assert.equal((await response.json() as { error: string }).error, "invalid_redirect_uri");
+    }
+    assert.equal(oauth.listPending().length, 0);
+  });
+});
+
 test("unknown OAuth clients get connection recovery guidance", async () => {
   await withOAuthServer(async (base) => {
     const response = await fetch(`${base}/oauth/authorize?client_id=drc_missing&response_type=code`);
@@ -107,7 +132,11 @@ test("a lost DevRelay DCR registration is restored after validating authorizatio
   });
 });
 
-test("OAuth DCR + PKCE + refresh flow", async () => {
+for (const [clientName, redirectUri] of [
+  ["ChatGPT", REDIRECT],
+  ["Claude", "https://claude.ai/api/mcp/auth_callback"]
+] as const) {
+test(`${clientName} OAuth DCR + PKCE + refresh flow`, async () => {
   await withOAuthServer(async (base, oauth) => {
     const metadata = await fetch(`${base}/.well-known/oauth-authorization-server`).then((response) => response.json());
     assert.deepEqual(metadata.code_challenge_methods_supported, ["S256"]);
@@ -116,11 +145,11 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        redirect_uris: [REDIRECT],
+        redirect_uris: [redirectUri],
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
-        client_name: "ChatGPT test"
+        client_name: `${clientName} test`
       })
     });
     assert.equal(registrationResponse.status, 201);
@@ -131,7 +160,7 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     const authorize = new URL(`${base}/oauth/authorize`);
     authorize.searchParams.set("response_type", "code");
     authorize.searchParams.set("client_id", registration.client_id);
-    authorize.searchParams.set("redirect_uri", REDIRECT);
+    authorize.searchParams.set("redirect_uri", redirectUri);
     authorize.searchParams.set("scope", "devrelay offline_access");
     authorize.searchParams.set("state", "state-123");
     authorize.searchParams.set("resource", RESOURCE);
@@ -173,7 +202,7 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
       grant_type: "authorization_code",
       client_id: registration.client_id,
       code,
-      redirect_uri: REDIRECT,
+      redirect_uri: redirectUri,
       code_verifier: verifier,
       resource: RESOURCE
     });
@@ -216,6 +245,7 @@ test("OAuth DCR + PKCE + refresh flow", async () => {
     assert.equal((await replay.json() as { error: string }).error, "invalid_grant");
   });
 });
+}
 
 
 test("newer OAuth authorization supersedes an older pending request", async () => {

@@ -102,6 +102,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 function oauthError(response: ServerResponse, status: number, error: string, description: string): void {
+  console.error(`[OAuth] rejected status=${status} error=${error}`);
   json(response, status, { error, error_description: description });
 }
 
@@ -142,6 +143,8 @@ async function readFormBody(request: IncomingMessage): Promise<URLSearchParams> 
 }
 
 function redirectUriAllowed(value: string): boolean {
+  // Hosted Claude clients share this exact callback; do not allow arbitrary Claude URLs.
+  if (value === "https://claude.ai/api/mcp/auth_callback") return true;
   try {
     const url = new URL(value);
     if (url.protocol !== "https:") return false;
@@ -412,7 +415,7 @@ export class DevRelayOAuthServer {
       const body = await readJsonBody(request);
       const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris.filter((value): value is string => typeof value === "string") : [];
       if (!redirectUris.length || redirectUris.length > 10 || redirectUris.some((uri) => !redirectUriAllowed(uri))) {
-        oauthError(response, 400, "invalid_redirect_uri", "DevRelay accepts only HTTPS ChatGPT/OpenAI redirect URIs.");
+        oauthError(response, 400, "invalid_redirect_uri", "DevRelay accepts only HTTPS ChatGPT/OpenAI redirect URIs or the hosted Claude OAuth callback.");
         return;
       }
       if (body.token_endpoint_auth_method !== undefined && body.token_endpoint_auth_method !== "none") {

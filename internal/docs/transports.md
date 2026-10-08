@@ -62,6 +62,10 @@ For OpenAI Secure Tunnel, the setup wizard instructs the user to create a ChatGP
 
 For HTTPS providers, the wizard shows the public `/mcp` endpoint and instructs the user to choose **OAuth**. ChatGPT initiates the OAuth flow and the visible DevRelay GUI presents the local Approve/Deny decision.
 
+## Claude Desktop / claude.ai registration
+
+Add the public `/mcp` endpoint as a custom connector, select OAuth sign-in, and choose **Register automatically** for the OAuth client. DevRelay supports DCR, not Client ID Metadata Documents (CIMD). The hosted Claude callback `https://claude.ai/api/mcp/auth_callback` is allowed exactly; Claude Code loopback callbacks are not enabled by this configuration. Approve the connection in the visible local DevRelay GUI. Cloudflare Quick Tunnel generates a new URL after restarting, so update the connector URL then.
+
 ## HTTP Inspector test
 
 With DevRelay already running in direct HTTP mode:

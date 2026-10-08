@@ -53,6 +53,13 @@ export async function serveHttp(manager: ProcessManager, identity: DeviceIdentit
 
     void (async () => {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (oauth && ["/oauth/register", "/oauth/authorize", "/oauth/token"].includes(url.pathname)) {
+        const startedAt = Date.now();
+        // Log only the route and status; OAuth query strings and bodies contain credentials.
+        response.once("finish", () => console.error(
+          `[OAuth] response id=${requestId} http=${request.method ?? "UNKNOWN"} path=${url.pathname} status=${response.statusCode} durationMs=${Date.now() - startedAt}`
+        ));
+      }
       if (url.pathname === "/mcp") {
         mcpRequest = true;
         diagnostics.beginRequest(
