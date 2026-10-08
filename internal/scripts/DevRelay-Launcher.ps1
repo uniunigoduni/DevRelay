@@ -360,6 +360,114 @@ function Invoke-OpenAIDoctor([string]$Exe, [string]$ApiKey) {
     Invoke-DevRelayExternal $Exe @("doctor", "--profile", $Profile, "--profile-dir", $ProfileDir, "--explain") | Out-Null
   } finally { $env:CONTROL_PLANE_API_KEY = $previous }
 }
+function Start-TunnelWithStartupRecovery($RuntimeProcess, [string]$Provider, [scriptblock]$StartTunnel) {
+  $initialFailure = $null
+  try {
+    $tunnel = & $StartTunnel
+    if ($null -eq $tunnel -or $tunnel.HasExited) { throw "$Provider tunnel exited during startup." }
+    return $tunnel
+  } catch {
+    $initialFailure = [string]$_
+    if ($initialFailure -match '(?i)not installed|not signed in|missing|incomplete|invalid credentials|invalid token|authentication failed|unauthorized|permission denied|access denied|invalid configuration|no such file|unsupported') { throw }
+  }
+  Write-Step "$Provider tunnel startup failed ($initialFailure); retrying for up to three minutes."
+  $startedAt = Get-Date
+  $retryDelays = @(1, 2, 4, 8, 15, 30)
+  for ($attempt = 1; ((Get-Date) - $startedAt).TotalSeconds -lt 180; $attempt++) {
+    $remaining = [Math]::Max(0, 180 - ((Get-Date) - $startedAt).TotalSeconds)
+    $delay = [Math]::Min($retryDelays[[Math]::Min($attempt - 1, $retryDelays.Count - 1)], $remaining)
+    Write-LauncherLifecycle "tunnel.recovery-retry" @{ provider = $Provider; phase = "startup"; attempt = $attempt; delayMs = [int]($delay * 1000) }
+    $until = (Get-Date).AddSeconds($delay)
+    while ((Get-Date) -lt $until) {
+      if ($RuntimeProcess.HasExited) { throw "DevRelay exited while reconnecting the tunnel, code $($RuntimeProcess.ExitCode)." }
+      Start-Sleep -Milliseconds 250
+    }
+    if (((Get-Date) - $startedAt).TotalSeconds -ge 180) { break }
+    try {
+      $tunnel = & $StartTunnel
+      if ($null -eq $tunnel -or $tunnel.HasExited) { throw "$Provider tunnel exited during reconnection startup." }
+      if (((Get-Date) - $startedAt).TotalSeconds -gt 180) {
+        Stop-ProcessTree $tunnel
+        throw "Tunnel became ready after the startup recovery deadline."
+      }
+      Write-LauncherLifecycle "tunnel.recovery-success" @{ provider = $Provider; phase = "startup"; attempt = $attempt; pid = $tunnel.Id }
+      Write-Step "$Provider tunnel restored after $attempt attempt(s)."
+      return $tunnel
+    } catch {
+      $message = [string]$_
+      Write-LauncherLifecycle "tunnel.recovery-failure" @{ provider = $Provider; phase = "startup"; attempt = $attempt; message = $message }
+      if ($message -match '(?i)not installed|not signed in|missing|incomplete|invalid credentials|invalid token|authentication failed|unauthorized|permission denied|access denied|invalid configuration|no such file|unsupported') { throw }
+    }
+  }
+  Write-LauncherLifecycle "tunnel.recovery-timeout" @{ provider = $Provider; phase = "startup"; attempts = $attempt - 1 }
+  throw "$Provider tunnel startup recovery timed out after 180 seconds."
+}
+
+function Wait-TunnelWithRecovery($RuntimeProcess, [ref]$CurrentTunnel, [string]$Provider, [scriptblock]$StartTunnel) {
+  # The budget survives consecutive short-lived reconnections, and resets after 60 seconds online.
+  $recoveryStart = $null
+  $attempt = 0
+  $lastConnectedAt = Get-Date
+  $retryDelays = @(1, 2, 4, 8, 15, 30)
+  while ($true) {
+    Start-Sleep -Seconds 1
+    if ($RuntimeProcess.HasExited) {
+      Write-LauncherLifecycle "runtime.exit" @{ pid = $RuntimeProcess.Id; exitCode = $RuntimeProcess.ExitCode }
+      Write-SessionProcessState "runtime-exited"
+      throw "DevRelay exited with code $($RuntimeProcess.ExitCode)."
+    }
+    if (-not $CurrentTunnel.Value.HasExited) { continue }
+    $exited = $CurrentTunnel.Value
+    $exitCode = $exited.ExitCode
+    Write-LauncherLifecycle "tunnel.exit" @{ pid = $exited.Id; exitCode = $exitCode; provider = $Provider }
+    Write-SessionProcessState "tunnel-exited"
+    if ($null -eq $recoveryStart -or ((Get-Date) - $lastConnectedAt).TotalSeconds -ge 60) {
+      $recoveryStart = Get-Date
+      $attempt = 0
+      Write-LauncherLifecycle "tunnel.recovery-begin" @{ provider = $Provider; exitCode = $exitCode; deadlineMs = 180000 }
+    }
+    Write-Step "$Provider tunnel exited with code $exitCode; keeping MCP runtime online during recovery."
+    $connected = $false
+    while (((Get-Date) - $recoveryStart).TotalSeconds -lt 180) {
+      $attempt++
+      $delay = $retryDelays[[Math]::Min($attempt - 1, $retryDelays.Count - 1)]
+      $remaining = [Math]::Max(0, 180 - ((Get-Date) - $recoveryStart).TotalSeconds)
+      $delay = [Math]::Min($delay, $remaining)
+      Write-LauncherLifecycle "tunnel.recovery-retry" @{ provider = $Provider; attempt = $attempt; delayMs = [int]($delay * 1000) }
+      $until = (Get-Date).AddSeconds($delay)
+      while ((Get-Date) -lt $until) {
+        if ($RuntimeProcess.HasExited) { throw "DevRelay exited while reconnecting the tunnel, code $($RuntimeProcess.ExitCode)." }
+        Start-Sleep -Milliseconds 250
+      }
+      if (((Get-Date) - $recoveryStart).TotalSeconds -ge 180) { break }
+      try {
+        $replacement = & $StartTunnel
+        if ($null -eq $replacement -or $replacement.HasExited) { throw "Tunnel exited during reconnection startup." }
+        if (((Get-Date) - $recoveryStart).TotalSeconds -gt 180) {
+          Stop-ProcessTree $replacement
+          throw "Tunnel became ready after the recovery deadline."
+        }
+        $CurrentTunnel.Value = $replacement
+        $lastConnectedAt = Get-Date
+        $connected = $true
+        Write-SessionProcessState "running"
+        Write-LauncherLifecycle "tunnel.recovery-success" @{ provider = $Provider; attempt = $attempt; pid = $replacement.Id }
+        Write-Step "$Provider tunnel restored after $attempt attempt(s)."
+        break
+      } catch {
+        $message = [string]$_
+        Write-LauncherLifecycle "tunnel.recovery-failure" @{ provider = $Provider; attempt = $attempt; message = $message }
+        Write-Step "$Provider reconnect attempt $attempt failed: $message"
+        if ($message -match '(?i)not installed|not signed in|missing|incomplete|invalid credentials|invalid token|authentication failed|unauthorized|permission denied|access denied|invalid configuration|no such file|unsupported') { throw }
+      }
+    }
+    if (-not $connected) {
+      Write-LauncherLifecycle "tunnel.recovery-timeout" @{ provider = $Provider; attempts = $attempt }
+      throw "$Provider tunnel recovery timed out after 180 seconds ($attempt attempts)."
+    }
+  }
+}
+
 function Show-LauncherStatus {
   $setup = Read-JsonFile $SetupPath
   Write-Host "DevRelay launcher status" -ForegroundColor Cyan
@@ -420,17 +528,23 @@ if ([string]$connection.kind -eq "openai-secure-tunnel") {
     $devRelayProcess = Start-DevRelay $nodeExe
     Invoke-OpenAIDoctor $tunnelExe $apiKey
     $env:CONTROL_PLANE_API_KEY = $apiKey
-    $tunnelProcess = Start-Process -FilePath $tunnelExe -ArgumentList @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) -WorkingDirectory $Root -NoNewWindow -PassThru
-    Set-TrackedProcess "tunnel" $tunnelProcess $tunnelExe @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) | Out-Null
-    Start-Sleep -Seconds 1
-    if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "openai"; phase = "startup" }; Write-SessionProcessState "tunnel-exited"; throw "OpenAI tunnel-client exited during startup with code $($tunnelProcess.ExitCode)." }
+    $tunnelProcess = Start-TunnelWithStartupRecovery $devRelayProcess "openai" {
+      $newTunnel = Start-Process -FilePath $tunnelExe -ArgumentList @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) -WorkingDirectory $Root -NoNewWindow -PassThru
+      Set-TrackedProcess "tunnel" $newTunnel $tunnelExe @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) | Out-Null
+      Start-Sleep -Seconds 1
+      if ($newTunnel.HasExited) { throw "OpenAI tunnel-client exited during startup with code $($newTunnel.ExitCode)." }
+      return $newTunnel
+    }
     Write-Host "DevRelay is online for ChatGPT." -ForegroundColor Green
     Write-Host "  Local MCP: $McpUrl"
     Write-Host "  Tunnel ID: $([string]$config.tunnelId)"
-    while ($true) {
+    Wait-TunnelWithRecovery $devRelayProcess ([ref]$tunnelProcess) "openai" {
+      Invoke-OpenAIDoctor $tunnelExe $apiKey
+      $newTunnel = Start-Process -FilePath $tunnelExe -ArgumentList @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) -WorkingDirectory $Root -NoNewWindow -PassThru
+      Set-TrackedProcess "tunnel" $newTunnel $tunnelExe @("run", "--profile", $Profile, "--profile-dir", $ProfileDir) | Out-Null
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "openai" }; Write-SessionProcessState "tunnel-exited"; throw "OpenAI tunnel-client exited with code $($tunnelProcess.ExitCode)." }
+      if ($newTunnel.HasExited) { throw "OpenAI tunnel-client exited during reconnection with code $($newTunnel.ExitCode)." }
+      return $newTunnel
     }
   } finally {
     Stop-ProcessTree $tunnelProcess
@@ -452,16 +566,20 @@ if ([string]$connection.provider -eq "tailscale") {
   $funnelProcess = $null
   try {
     $devRelayProcess = Start-DevRelay $nodeExe
-    $funnelProcess = Start-TailscaleFunnel $tailscaleExe
-    Start-Sleep -Seconds 1
-    if ($funnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $funnelProcess.Id; exitCode = $funnelProcess.ExitCode; provider = "tailscale"; phase = "startup" }; Write-SessionProcessState "tunnel-exited"; throw "Tailscale Funnel exited during startup with code $($funnelProcess.ExitCode)." }
+    $funnelProcess = Start-TunnelWithStartupRecovery $devRelayProcess "tailscale" {
+      $newTunnel = Start-TailscaleFunnel $tailscaleExe
+      Start-Sleep -Seconds 1
+      if ($newTunnel.HasExited) { throw "Tailscale Funnel exited during startup with code $($newTunnel.ExitCode)." }
+      return $newTunnel
+    }
     Write-Host "DevRelay HTTPS is online." -ForegroundColor Green
     Write-Host "  Local MCP:  $McpUrl"
     Write-Host "  Public MCP: $publicMcpUrl"
-    while ($true) {
+    Wait-TunnelWithRecovery $devRelayProcess ([ref]$funnelProcess) "tailscale" {
+      $newTunnel = Start-TailscaleFunnel $tailscaleExe
       Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($funnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $funnelProcess.Id; exitCode = $funnelProcess.ExitCode; provider = "tailscale" }; Write-SessionProcessState "tunnel-exited"; throw "Tailscale Funnel exited with code $($funnelProcess.ExitCode)." }
+      if ($newTunnel.HasExited) { throw "Tailscale Funnel exited during reconnection with code $($newTunnel.ExitCode)." }
+      return $newTunnel
     }
   } finally {
     Stop-ProcessTree $funnelProcess
@@ -482,14 +600,14 @@ if ([string]$connection.provider -eq "cloudflare" -and [string]$connection.varia
   $tunnelProcess = $null
   try {
     $devRelayProcess = Start-DevRelay $nodeExe
-    $tunnelProcess = Start-CloudflareNamed $cloudflaredExe $named
+    $tunnelProcess = Start-TunnelWithStartupRecovery $devRelayProcess "cloudflare" {
+      Start-CloudflareNamed $cloudflaredExe $named
+    }
     Write-Host "DevRelay HTTPS is online." -ForegroundColor Green
     Write-Host "  Local MCP:  $McpUrl"
     Write-Host "  Public MCP: $publicMcpUrl"
-    while ($true) {
-      Start-Sleep -Seconds 1
-      if ($devRelayProcess.HasExited) { Write-LauncherLifecycle "runtime.exit" @{ pid = $devRelayProcess.Id; exitCode = $devRelayProcess.ExitCode }; Write-SessionProcessState "runtime-exited"; throw "DevRelay exited with code $($devRelayProcess.ExitCode)." }
-      if ($tunnelProcess.HasExited) { Write-LauncherLifecycle "tunnel.exit" @{ pid = $tunnelProcess.Id; exitCode = $tunnelProcess.ExitCode; provider = "cloudflare" }; Write-SessionProcessState "tunnel-exited"; throw "cloudflared exited with code $($tunnelProcess.ExitCode)." }
+    Wait-TunnelWithRecovery $devRelayProcess ([ref]$tunnelProcess) "cloudflare" {
+      Start-CloudflareNamed $cloudflaredExe $named
     }
   } finally {
     Stop-ProcessTree $tunnelProcess
