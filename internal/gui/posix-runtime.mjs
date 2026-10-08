@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuild } from "./prepare.mjs";
 import { tailscalePath } from "./setup/provider-actions.mjs";
+import { isPermanentTunnelError, isRestartableTunnel, recoverTunnel } from "./tunnel-recovery.mjs";
 
 const guiDir = path.dirname(fileURLToPath(import.meta.url));
 const internalRoot = path.resolve(guiDir, "..");
@@ -202,7 +203,7 @@ async function startQuickTunnel(executable) {
   return { running: quick, publicUrl: foundUrl };
 }
 
-async function startNamedTunnel(executable, settings) {
+async function startNamedTunnel(executable, settings, attempt = 0) {
   const credentialsPath = settings.credentialsPath;
   if (!settings.tunnelId || !settings.tunnelName || !settings.hostname || !credentialsPath || !await exists(credentialsPath)) {
     throw new Error("Cloudflare custom hostname settings are incomplete. Reopen Connection Setup.");
@@ -212,20 +213,52 @@ async function startNamedTunnel(executable, settings) {
   const configPath = path.join(runtimeDir, "config.yml");
   const config = `tunnel: ${settings.tunnelId}\ncredentials-file: ${JSON.stringify(credentialsPath)}\ningress:\n  - hostname: ${settings.hostname}\n    service: http://${hostAddress}:${port}\n    originRequest:\n      httpHostHeader: localhost\n  - service: http_status:404\n`;
   await writeFile(configPath, config, { encoding: "utf8", mode: 0o600 });
-  const logPath = path.join(sessionDir || stateDir, "cloudflared-named.log");
+  const logPath = path.join(sessionDir || stateDir, attempt ? `cloudflared-named-retry-${attempt}.log` : "cloudflared-named.log");
   await rm(logPath, { force: true });
   const tunnel = await trackedSpawn("tunnel", executable, ["tunnel", "--config", configPath, "--loglevel", "info", "--logfile", logPath, "run", settings.tunnelName]);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) {
       const result = await tunnel.completion;
-      throw new Error(`cloudflared exited during startup with code ${result.code}.`);
+      throw new Error(`cloudflared exited during startup with code ${result.code}. ${result.outputTail.slice(-1500)}`);
     }
     const details = await readFile(logPath, "utf8").catch(() => "");
     if (details.includes("Registered tunnel connection")) return { running: tunnel, publicUrl: `https://${settings.hostname}/mcp` };
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  // Do not leave a failed start running while a recovery attempt launches its replacement.
+  await stopFailedTunnel(tunnel);
   throw new Error("Cloudflare custom hostname did not become ready within 20 seconds.");
+}
+
+async function stopFailedTunnel(handle) {
+  if (handle.child.exitCode !== null || handle.child.signalCode !== null) return;
+  try { handle.child.kill("SIGTERM"); } catch { return; }
+  await Promise.race([handle.completion.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 750))]);
+  if (handle.child.exitCode === null && handle.child.signalCode === null) handle.child.kill("SIGKILL");
+}
+
+async function recoveryPause(ms) {
+  const until = Date.now() + ms;
+  while (!stopping && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, Math.min(250, until - Date.now())));
+  return !stopping;
+}
+
+async function runTunnelRecovery({ start, runtime, previous, uptimeMs }) {
+  return await recoverTunnel({
+    start,
+    previous,
+    uptimeMs,
+    shouldStop: () => stopping,
+    runtimeAlive: () => runtime.child.exitCode === null && runtime.child.signalCode === null,
+    pause: recoveryPause,
+    report(event, detail) {
+      appendLifecycle(`tunnel.recovery-${event}`, detail);
+      if (event === "retry") log(`Tunnel reconnect attempt ${detail.attempt} in ${detail.delayMs}ms.`);
+      if (event === "failure") log(`Tunnel reconnect attempt ${detail.attempt} failed: ${detail.error}`);
+      if (event === "success") log(`Tunnel connection restored after ${detail.attempt} attempt(s).`);
+    }
+  });
 }
 
 async function startTailscaleTunnel(executable) {
@@ -242,6 +275,18 @@ async function startOpenAITunnel(executable, profile, env) {
     throw new Error(`OpenAI tunnel-client exited during startup with code ${result.code}.`);
   }
   return tunnel;
+}
+
+async function startTunnelWithRecovery(start, runtime) {
+  try {
+    return { tunnel: await start(0), state: null, connectedAt: Date.now() };
+  } catch (error) {
+    if (stopping || isPermanentTunnelError(error)) throw error;
+    log(`Tunnel initial startup failed (${error.message}); retrying for up to three minutes.`);
+    const recovered = await runTunnelRecovery({ start, runtime, previous: null, uptimeMs: 0 });
+    if (!recovered) throw new Error("DevRelay runtime stopped during tunnel startup recovery.");
+    return recovered;
+  }
 }
 
 async function runLauncher() {
@@ -265,6 +310,9 @@ async function runLauncher() {
   let publicUrl = null;
   let tunnel = null;
   let runtime = null;
+  let startTunnel = null;
+  let recoveryState = null;
+  let connectedAt = Date.now();
   const runtimeEnv = { ...process.env, DEVRELAY_STATE_DIR: stateDir };
   const isHttps = connection.kind === "https";
 
@@ -280,7 +328,8 @@ async function runLauncher() {
     const apiEnv = { ...runtimeEnv, CONTROL_PLANE_API_KEY: apiKey };
     await runCommand(tunnelExe, ["init", "--sample", "sample_mcp_remote_no_auth", "--profile", profile, "--profile-dir", profileDir, "--tunnel-id", config.tunnelId, "--mcp-server-url", mcpUrl, "--health-listen-addr", "127.0.0.1:0", "--force"], { env: apiEnv });
     runtime = await startDevRelay(runtimeEnv);
-    tunnel = await startOpenAITunnel(tunnelExe, profile, apiEnv);
+    startTunnel = () => startOpenAITunnel(tunnelExe, profile, apiEnv);
+    ({ tunnel, state: recoveryState, connectedAt } = await startTunnelWithRecovery(startTunnel, runtime));
     log("DevRelay is online for ChatGPT.");
     log(`Local MCP: ${mcpUrl}`);
     log(`Tunnel ID: ${config.tunnelId}`);
@@ -317,20 +366,45 @@ async function runLauncher() {
 
   if (connection.provider === "tailscale") {
     const tailscale = await tailscalePath();
-    tunnel = await startTailscaleTunnel(tailscale);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) throw new Error("Tailscale Funnel exited during startup.");
+    startTunnel = async () => {
+      const running = await startTailscaleTunnel(tailscale);
+      await recoveryPause(1000);
+      if (running.child.exitCode !== null || running.child.signalCode !== null) throw new Error("Tailscale Funnel exited during startup.");
+      return running;
+    };
+    ({ tunnel, state: recoveryState, connectedAt } = await startTunnelWithRecovery(startTunnel, runtime));
   } else if (connection.provider === "cloudflare" && connection.variant === "named") {
     const cloudflared = await providerExecutable("cloudflared", "cloudflared", platformArch());
     const named = await readJson(path.join(stateDir, "cloudflare-named.json")) || await readJson(path.join(stateDir, "https-named.json"));
-    tunnel = (await startNamedTunnel(cloudflared, named)).running;
+    startTunnel = async (attempt = 0) => (await startNamedTunnel(cloudflared, named, attempt)).running;
+    ({ tunnel, state: recoveryState, connectedAt } = await startTunnelWithRecovery(startTunnel, runtime));
   }
 
   log("DevRelay HTTPS is online.");
   log(`Local MCP: ${mcpUrl}`);
   log(`Public MCP: ${publicUrl}`);
-  const result = await Promise.race([runtime.completion.then((value) => ({ role: "runtime", value })), tunnel.completion.then((value) => ({ role: "tunnel", value }))]);
-  if (!stopping) throw new Error(`${result.role} process exited with code ${result.value.code}.`);
+  while (!stopping) {
+    const result = await Promise.race([
+      runtime.completion.then((value) => ({ role: "runtime", value })),
+      tunnel.completion.then((value) => ({ role: "tunnel", value }))
+    ]);
+    if (stopping) return;
+    if (result.role === "runtime" || !isRestartableTunnel(connection) || !startTunnel) {
+      throw new Error(`${result.role} process exited with code ${result.value.code}.`);
+    }
+    log(`Tunnel process exited with code ${result.value.code}; keeping MCP runtime online during recovery.`);
+    appendLifecycle("tunnel.recovery-trigger", { exitCode: result.value.code, signal: result.value.signal });
+    const resumed = await runTunnelRecovery({
+      start: startTunnel, runtime, previous: recoveryState, uptimeMs: Date.now() - connectedAt
+    });
+    if (!resumed) {
+      if (stopping) return;
+      throw new Error("DevRelay runtime exited while restoring tunnel.");
+    }
+    tunnel = resumed.tunnel;
+    recoveryState = resumed.state;
+    connectedAt = resumed.connectedAt;
+  }
 }
 
 async function stopChildren() {
